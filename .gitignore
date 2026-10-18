@@ -1,0 +1,27 @@
+# ------------------------------------------------------------------ builds
+/build/
+build/
+cmake-build-*/
+*.o
+*.a
+.dSYM/
+
+# ------------------------------------------------------------------ outputs
+# ROM images and assembly listings produced next to a source file
+*.bin
+/examples/*.asm
+/t1.asm
+out.asm
+out.bin
+
+# ------------------------------------------------------------------ the emulator
+# Vendored CasioEmuMsvc tree: 400+ MB, git submodules and copyrighted ROMs.
+# Build it locally, see emulator/BUILD-MACOS.md.
+/emulator/
+
+# ------------------------------------------------------------------ misc
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.recon/

@@ -1,0 +1,17 @@
+# 04_arrays - RAM arrays. Arrays must be declared at the top level, then used
+# like any other variable. `rom8` holds read-only bytes (here, a string).
+
+squares = [0] * 6                  # six 16-bit cells, initialised to 0
+rom8 title = "sum of squares"      # a NUL-terminated string in ROM
+
+
+def main():
+    total = 0
+    for i in range(0, 6):
+        squares[i] = (i + 1) * (i + 1)   # 1, 4, 9, 16, 25, 36
+        total += squares[i]
+    clear()
+    text(4, 4, title)
+    for i in range(0, 6):
+        fillrect(12 + i * 20, 46 - squares[i], 10, squares[i])   # a bar per value
+    print(4, 56, "total = ", total)

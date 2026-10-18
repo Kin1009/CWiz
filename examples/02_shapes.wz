@@ -1,0 +1,15 @@
+# 02_shapes - a tour of every drawing helper the standard library offers.
+# Build:  build/wizc examples/02_shapes.wz
+
+def main():
+    clear()
+    rect(0, 0, 192, 64)          # frame: top, bottom and both sides
+    line(2, 2, 189, 61)          # Bresenham line
+    line(189, 2, 2, 61)          # the other diagonal
+    circle(40, 32, 16)           # outline circle
+    disc(150, 18, 9)             # filled circle
+    fillrect(120, 38, 56, 18)    # filled rectangle
+    hline(4, 30, 6)              # horizontal span, y=6
+    vline(96, 4, 60)             # vertical span, x=96
+    text(4, 44, "shapes")
+    num(138, 6, -2026)           # signed decimal, returns the end x
