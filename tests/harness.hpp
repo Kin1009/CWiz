@@ -190,6 +190,7 @@ void run_cw();
 void run_cwiz();
 void run_cpre();
 void run_cwapp();
+void run_lint();
 void run_fuzz();
 
 }  // namespace wt

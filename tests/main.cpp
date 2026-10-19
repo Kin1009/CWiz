@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
     run_guarded("test_cwapp", wt::run_cwapp);
     run_guarded("test_cwiz", wt::run_cwiz);
     run_guarded("test_cpre", wt::run_cpre);
+    run_guarded("test_lint", wt::run_lint);
     run_guarded("test_fuzz", wt::run_fuzz);
 
     std::printf("\n%d checks, %d failure(s)\n", wt::checks(), (int)wt::fails().size());

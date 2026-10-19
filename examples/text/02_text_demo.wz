@@ -1,0 +1,13 @@
+# 02_text_demo - showcase: printLarge (CW Mono, big 8x8, 7 px advance)
+# vs printMini (CW Text, 8 px, proportional advance from FONT_TEXT8 + ADV).
+# Build: build/wizc examples/text/02_text_demo.wz
+
+def main():
+    clear()
+    # Large / mono set
+    printLarge(4, 8, "LARGE MONO")
+    printLarge(4, 24, "Score: 99")
+
+    # Mini / text set (small, proportional)
+    printMini(4, 40, "MINI TEXT")
+    printMini(4, 56, "Hello!")

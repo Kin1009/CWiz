@@ -1,58 +1,37 @@
-# Example programs
+# Example programs — organized library
 
-Every example is a single source file. Wiz examples live directly in this directory (`*.wz`);
-CWiz examples live in [`cwiz/`](cwiz) (`*.cwiz`). Build one with `wizc`, or run it in the simulator
-and look at the screen with `wizrun`:
+Every category has parallel `.wz` / `.cwiz` pairs where appropriate.
+All examples use 8-px line spacing and stay inside 192 x 64 px.
+
+## Categories
+
+| Category | File | Description |
+|----------|------|-------------|
+| **hello** | `hello/01_hello.wz` / `.cwiz` | Smallest visible program (`clear`, `text`, `wait_key`). |
+| **text** | `text/02_text_demo.wz` / `.cwiz` | Showcase: `printLarge` (CW Mono 8x8, 7 px) vs `printMini` (CW Text 8 px, proportional from FONT_TEXT8 + ADV; missing glyphs fall back to CW Mono at same height). |
+| **shapes** | `shapes/03_shapes.wz` / `.cwiz` | Drawing primitives (`rect`, `line`, `circle`, `disc`, `fillrect`, `hline`, `vline`). Labels sit on 8-px lines (`y` = 8, 16, 24, 32, 40, 48, 56). |
+| **input** | `input/04_keys.wz` / `.cwiz` | Arrow-key box + `key()` echo using `printLarge`; double-buffered (`buffered`/`flip`). |
+| **arrays** | `arrays/05_arrays.wz` / `.cwiz` | RAM array + `rom8` / `rom int`; bar chart with 8-px text grid. |
+| **math** | `math/06_math.wz` / `.cwiz` | Arithmetic, clamped ranges (`clamp`), `printMini` for proportional numbers. |
+| **cwapp** | `cwapp/07_cwapp.cwiz` | `#cwapp`, `#slot 2`, `#for 580`, `exit()`; builds to a full patched 580 ROM `.bin` (does not overwrite embedded stock ROM). |
+| **580/880** | `580_880/08_target.wz` / `.cwiz` | Target-independent; works unchanged for 580 (`192x63`, 1 bp) or 880 (`192x64`, 2 bp). |
+
+## Two-print-set note
+
+- `printLarge(x, y, ...)` draws the **CW Mono** font at 8 px tall with a fixed 7 px advance (`FONT_LARGE`).
+- `printMini(x, y, ...)` draws the **CW Text** font at 8 px tall with a *proportional* advance from `FONT_MINI` / `FONT_TEXT8 + ADV`; missing characters use the CW Mono fallback drawn at the same 8 px height.
+- `text()` / `num()` still use the embedded 6x8 CW Mono (`FONT6X8`) with 6 px advance.
+- `print()` from earlier versions is deprecated; use `printLarge` or `printMini`.
+
+## Build quick-reference
 
 ```console
-$ build/wizc examples/01_hello.wz               # -> examples/01_hello.bin (+ .asm)
-$ build/wizrun examples/02_shapes.wz --steps 4000000
-
-$ build/wizc examples/cwiz/02_shapes.cwiz        # the CWiz front end is picked by .cwiz
-$ build/wizrun examples/cwiz/01_hello.cwiz
+# Wiz (.wz)
+$ WIZ_ROOT=$PWD ./build/wizc examples/hello/01_hello.wz
+# CWiz (.cwiz)
+$ WIZ_ROOT=$PWD ./build/wizc examples/hello/01_hello.cwiz
+# cwapp (writes full 256 KB patched ROM to source-dir .bin)
+$ WIZ_ROOT=$PWD ./build/wizc examples/cwapp/07_cwapp.cwiz
 ```
 
-Most Wiz examples are written to be target-independent and build unchanged for either machine
-(`--target 580` or `--target 880`). `10_app_hello.wz` is `cwapp`-only (the compiler detects the `for cwapp` section and patches the built-in 580 ROM automatically);
-`cwiz/10_app_hello.cwiz` uses `#for 580` / `#cwapp` sections to build for both.
-
-## Wiz
-
-| File | What it shows |
-|------|---------------|
-| `01_hello.wz` | The minimum: `clear`, `text`, `wait_key`. |
-| `02_shapes.wz` | Every drawing primitive: `rect`, `fillrect`, `line`, `circle`, `disc`, `hline`, `vline`, `text`, `num`. |
-| `03_keys.wz` | Input: move a box with the arrow keys, echo `key()`; double buffering with `buffered`/`flip`. |
-| `04_arrays.wz` | A RAM array (`[0] * 6`), indexed reads/writes in loops, a `rom8` string, and `print`. |
-| `05_pong.wz` | A complete two-paddle Pong: `fillrect` gameplay, an opponent that tracks the ball, a score strip, a win screen. Read this to see a real game loop. |
-| `06_demo.wz` | Recursion (`fib`), a loop (`fact`), `print` layout, and `key_hit` edge detection. |
-| `07_catch.wz` | A reflex game using `rand`, `key_down`, `rect`/`fillrect`, and a status line. (Comments are in Vietnamese.) |
-| `10_app_hello.wz` | A `cwapp` program: a `for cwapp` section with `exit()`, patchable into an fx-580VN X menu. It declares only the `cwapp` target; `wizc 10_app_hello.wz` writes a complete, patched 580 ROM, and `wizrun app.bin 580` runs it. Add `#slot n` (CWiz only) to choose a menu slot other than 2. |
-
-## CWiz
-
-The same tour in C syntax, sharing the built-ins and the graphics library:
-
-| File | What it shows |
-|------|---------------|
-| `01_hello.cwiz` | `clear`, `text`, `num`. |
-| `02_shapes.cwiz` | The drawing library plus a `rom8` sprite and `sprite()`. |
-| `03_keys.cwiz` | `key_down`/`key_hit`, the `K_*` constants and a box you can move. |
-| `04_arrays.cwiz` | RAM arrays, a `rom int` table and a `rom8 char` string (see [GUIDE §20](../docs/GUIDE.md#20-cwiz-in-c-syntax)). |
-| `05_pong.cwiz` | A one-player Pong game loop with `fillrect`, `hline`, `num` and `key_down`. |
-| `06_demo.cwiz` | Recursion, functions with default arguments, `print`, and `abs` from the standard library. |
-| `07_preproc.cwiz` | The preprocessor: `#define` (object- and function-like), `#if`/`#ifdef`, `#include`, `__ROWS__`, and target sections written with the `#for` directive. It includes `07_hud.cwiz`, which is not a program but the shared HUD header. |
-| `08_pointers.cwiz` | Addresses and memory: `int*`/`char*`, `&`, `*p`, `p[i]`, pointer arithmetic, and a `char` string buffer (see [GUIDE §20.2](../docs/GUIDE.md#202-pointers-and-memory)). |
-| `10_app_hello.cwiz` | The CWiz twin of `10_app_hello.wz`: an fx-580VN X firmware app. `#for 580` / `#cwapp` sections pick `leave()` per target, so the same file builds as a plain 580 ROM or as the patched app; `#slot 2` chooses the menu slot. |
-
-## A good reading order
-
-1. `01_hello` → `02_shapes` → `03_keys` to learn the basics interactively.
-2. `04_arrays` once you need data.
-3. `05_pong` as a template for a full game (double buffering, input, collision, scoring).
-4. `10_app_hello` if you want to run something inside the stock firmware.
-5. Then read `examples/cwiz/` to see the same ideas in CWiz:
-   `07_preproc.cwiz` for the preprocessor and `08_pointers.cwiz` for memory.
-
-The comments at the top of each file state what it demonstrates; the code itself is commented
-inline. For the language details behind any line, see [../docs/GUIDE.md](../docs/GUIDE.md).
+All examples stay inside the 192 x 64 pixel screen. No external dependencies.

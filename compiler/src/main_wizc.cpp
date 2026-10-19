@@ -7,9 +7,11 @@
 #include <vector>
 
 #include "build.hpp"
+#include "builtin_rom.hpp"
 #include "cli.hpp"
 #include "cpre.hpp"
 #include "diag.hpp"
+#include "patch.hpp"
 #include "version.hpp"
 #include "wiz.hpp"
 
@@ -21,12 +23,16 @@ static const char* DOC =
     "Compiles Wiz (.wz) and CWiz (.cwiz) source for Casio ClassWiz calculators and\n"
     "writes a ROM image (.bin) plus an assembly listing (.asm).\n"
     "\n"
+    "A source with a #cwapp section is compiled for the fx-580VN X firmware and\n"
+    "patched into the built-in 580 ROM automatically; #slot n chooses the menu slot\n"
+    "(1..12, default 2).  The .bin is then a complete, runnable 256 KB ROM.\n"
+    "\n"
     "    wizc [options] file...\n"
     "\n"
     "Options:\n"
     "  -o FILE              write the ROM image to FILE\n"
-    "  --target MODEL       target calculator: 580 or 880   (default: 880)\n"
-    "  --cwapp              build a fx-580VN X firmware patch (implies --target 580)\n"
+    "  --target MODEL       target calculator: 580 or 880   (default: by source)\n"
+    "  --cwapp              force the fx-580VN X firmware app target (implies 580)\n"
     "  --lang LANG          force input language: wiz | cwiz   (default: by extension)\n"
     "  -S                   stop after assembly: write the .asm listing, no .bin\n"
     "  -E, --pp             preprocess only (expand directives) and print to stdout\n"
@@ -71,6 +77,9 @@ static std::string resolve_target(const Cli& args, Diag& d, const std::string& s
                 declared.clear();
             }
         }
+        // A #cwapp section means "firmware app": build it and patch the built-in
+        // 580 ROM unless the user explicitly selected another calculator above.
+        if (contains(declared, "cwapp")) return "cwapp";
         if (declared.size() == 1) return declared[0];
         if (!declared.empty() && !contains(declared, DEFAULT_TARGET)) return declared[0];
     }
@@ -149,19 +158,42 @@ static bool compile_one(const std::string& src, const Cli& args, Diag& d) {
     std::string bin_path, asm_path;
     output_paths(src, args.value("output"), bin_path, asm_path);
     const Target& tg = get_target(target.empty() ? DEFAULT_TARGET : target);
+    const bool asm_only = args.has("asm_only");
+
+    // A #cwapp program is patched into the built-in fx-580VN X ROM right here,
+    // so the .bin is a complete image that wizrun can load directly.
+    bool patched = false;
+    int patched_slot = br.slot;
+    if (br.cwapp && !asm_only) {
+        std::vector<uint8_t> rom(kFx580VnRom, kFx580VnRom + kFx580VnRomSize);
+        RomPatchReport pr = patch_rom_image(std::move(rom), br, br.slot, false, true);
+        for (const std::string& warning : pr.warnings) {
+            // The bundled dump is a known variant; do not repeat the hook note.
+            if (pr.hook_forced && warning.rfind("set_mode at", 0) == 0) continue;
+            d.note(warning, src);
+        }
+        if (!pr.ok) {
+            d.error(pr.error, src, pr.error_line, pr.error_col,
+                    pr.error_line > 0 ? source_line_at(read_text_file(src), pr.error_line) : "");
+            return false;
+        }
+        br.rom = std::move(pr.rom);
+        patched = true;
+        patched_slot = pr.slot;
+    }
 
     try {
         if (!args.has("no-asm") && !write_text_file(asm_path, br.full_asm))
             d.fatal("cannot write output: " + asm_path);
-        if (!args.has("asm_only") && !write_binary_file(bin_path, br.rom))
+        if (!asm_only && !write_binary_file(bin_path, br.rom))
             d.fatal("cannot write output: " + bin_path);
     } catch (const std::exception& e) {
         d.fatal(fmt("cannot write output: %s", e.what()));
     }
 
     const bool tty = stdout_is_tty();
-    bool asm_only = args.has("asm_only");
     std::string summary = target_desc(tg.name);
+    if (patched) summary += fmt(" slot %d", patched_slot);
     std::string out_desc = asm_only ? asm_path : bin_path;
     const char* label = asm_only ? "AS" : "CC";
     std::fputs(fmt("%s %s -> %s\n", paint(label, style::OK, tty).c_str(), bold(src, tty).c_str(),

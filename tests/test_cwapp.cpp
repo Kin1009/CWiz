@@ -76,6 +76,43 @@ void wt::run_cwapp() {
     check("cwapp: AC -> exit() lands on the firmware reset handler 0:A1CE with SP = F000",
           c.why == "stop at 0:A1CE" && c.m.sp == 0xF000, c.why);
 
+    // wizc embeds the 580 ROM and patches #cwapp programs without --cwapp.
+    {
+        namespace fs = std::filesystem;
+        fs::path dir = fs::temp_directory_path() / "wiz_cwapp_auto";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        const std::string src =
+            "#for 580\n"
+            "void reveal() { }\n"
+            "#cwapp\n"
+            "#slot 9\n"
+            "void reveal() { exit(); }\n"
+            "----\n"
+            "void main() { clear(); while (1) { } }\n";
+        check("test setup: writes a #slot source", wiz::write_text_file((dir / "slot.cwiz").string(), src), "");
+        CliResult r = cli_run(dir.string(), {"slot.cwiz", "-o", "slot.bin", "--no-asm"});
+        check("wizc: #cwapp is patched automatically (no --cwapp)", r.rc == 0, r.out);
+        bool ok = false;
+        std::vector<uint8_t> bin = wiz::read_binary_file((dir / "slot.bin").string(), &ok);
+        check("wizc: output is a complete 256 KB ROM", ok && bin.size() == 262144,
+              std::to_string(bin.size()));
+        if (bin.size() == 262144) {
+            check("wizc: installs the seg-3 hook", bin[0x25E1E] == 0x00 && bin[0x25E1F] == 0xF3 &&
+                                                    bin[0x25E20] == 0x40 && bin[0x25E21] == 0x0E,
+                  wiz::fmt("%02x %02x %02x %02x", bin[0x25E1E], bin[0x25E1F], bin[0x25E20],
+                           bin[0x25E21]));
+            const size_t slot9 = 0x7FF8 + 6 * 8 + 2;
+            check("wizc: selects the #slot menu entry", bin[slot9] == 0xE0 && bin[slot9 + 1] == 0x00,
+                  wiz::fmt("%02x %02x", bin[slot9], bin[slot9 + 1]));
+        }
+        std::string runlog;
+        int rc = run_prog(bin_sibling("wizrun"),
+                          {(dir / "slot.bin").string(), "580", "--steps", "5000"}, &runlog);
+        check("wizrun: runs the patched .bin with a model number", rc == 0 && runlog.find("ran") != std::string::npos,
+              runlog);
+    }
+
     // ROM-level checks on the patched image (needs the sample ROM next to the repo; skipped otherwise)
     std::vector<std::string> candidates = {"/mnt/user-data/uploads/bro.bin", root_path("bro.bin")};
     for (const auto& rp : candidates) {

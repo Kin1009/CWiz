@@ -1,0 +1,7 @@
+// 08_target.cwiz - target-independent demo.
+
+void main() {
+    clear();
+    printLarge(8, 8, "580 / 880");
+    text(8, 24, "target-independent");
+}

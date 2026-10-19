@@ -169,6 +169,38 @@ void wt::run_cpre() {
               has(out, "for 580") && has(out, "for cwapp") && has(out, "int every;"), out);
     }
     {
+        wiz::CwizPreprocessInfo info =
+            wiz::preprocess_cwiz_info("#for 580\n#cwapp\n#slot 7\nint app;\n", "t.cwiz", "cwapp");
+        check("#slot after #cwapp selects a menu slot and is stripped",
+              info.has_cwapp && info.slot == 7 && !has(info.text, "#slot"), info.text);
+    }
+    {
+        wiz::CwizPreprocessInfo info =
+            wiz::preprocess_cwiz_info("#for 580\n#cwapp\nint app;\n", "t.cwiz", "cwapp");
+        check("#slot defaults to menu slot 2", info.has_cwapp && info.slot == 2,
+              std::to_string(info.slot));
+    }
+    {
+        PpErr e = pp_error("#slot 2\n#for 580\n#cwapp\nint app;\n",
+                           "only available after #cwapp", "cwapp");
+        check("lint: #slot before #cwapp is rejected", e.ok, e.msg);
+    }
+    {
+        PpErr e = pp_error("#for 580\n#cwapp\n#slot 13\nint app;\n", "1 to 12", "cwapp");
+        check("#slot outside 1..12 is rejected", e.ok, e.msg);
+    }
+    {
+        PpErr e = pp_error("#for 580\n#cwapp\n#slot 2\n#slot 3\nint app;\n", "already set",
+                           "cwapp");
+        check("a second #slot in one #cwapp section is rejected", e.ok, e.msg);
+    }
+    {
+        wiz::BuildResult b =
+            wiz::build_cwiz("#for 580\n#cwapp\n#slot 4\nvoid main() { }\n", "cwapp", "t.cwiz");
+        check("the build result carries the #slot value", b.cwapp && b.slot == 4,
+              std::to_string(b.slot));
+    }
+    {
         // The sections are checked on the selected text: running a cwapp image
         // needs the firmware's menu mapping, which the simulator does not set up
         // here (see `wizrun --cwapp`).
@@ -266,7 +298,7 @@ void wt::run_cpre() {
         PpErr e = pp_error("#include \"loop.cwiz\"", "#include cycle", "cwii", dir + "/main2.cwiz");
         check("#include cycle is an error", e.ok, e.msg);
 
-        PpErr miss = pp_error("#include \"nope_missing.cwiz\"", "cannot read #include", "cwii",
+        PpErr miss = pp_error("#include \"nope_missing.cwiz\"", "file not found", "cwii",
                               dir + "/main3.cwiz");
         check("a missing #include is an error", miss.ok, miss.msg);
 

@@ -11,6 +11,7 @@
 #     build/wizrun         build + run a program in the simulator
 #     build/customromrun   run a ROM image on a CasioEmuMsvc model
 #     build/patch_menu     patch a program into an fx-580VN X firmware dump
+#     build/wizlint        lint .wz / .cwiz sources (gcc-style, --json)
 #     build/wiztests       the toolchain test suite
 cmake_minimum_required(VERSION 3.16)
 project(wiz CXX)
@@ -38,6 +39,9 @@ add_library(wizcore STATIC
   src/cwiz.cpp
   src/cpre.cpp
   src/build.cpp
+  src/builtin_rom.cpp
+  src/patch.cpp
+  src/lint.cpp
 )
 target_include_directories(wizcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -46,8 +50,9 @@ add_executable(wizc        src/main_wizc.cpp)
 add_executable(wizrun      src/main_wizrun.cpp)
 add_executable(customromrun src/main_customromrun.cpp)
 add_executable(patch_menu  src/main_patch_menu.cpp)
+add_executable(wizlint     src/main_wizlint.cpp)
 
-foreach(tool wizc wizrun customromrun patch_menu)
+foreach(tool wizc wizrun customromrun patch_menu wizlint)
   target_link_libraries(${tool} PRIVATE wizcore)
 endforeach()
 
@@ -62,6 +67,7 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_cwapp.cpp
   ${WIZ_TESTS_DIR}/test_cwiz.cpp
   ${WIZ_TESTS_DIR}/test_cpre.cpp
+  ${WIZ_TESTS_DIR}/test_lint.cpp
   ${WIZ_TESTS_DIR}/test_fuzz.cpp
 )
 target_include_directories(wiztests PRIVATE "${WIZ_TESTS_DIR}")
