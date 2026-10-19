@@ -1,0 +1,109 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CWiz",
+  "scopeName": "source.cwiz",
+  "patterns": [
+    { "include": "#directives" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#functions" }
+  ],
+  "repository": {
+    "directives": {
+      "patterns": [
+        {
+          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot)\\b(.*)$",
+          "captures": {
+            "1": { "name": "punctuation.definition.directive.cwiz" },
+            "2": { "name": "keyword.control.directive.cwiz" },
+            "3": { "name": "string.unquoted.directive.cwiz" }
+          }
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.cwiz", "match": "//.*$" },
+        {
+          "name": "comment.block.cwiz",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.cwiz",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.cwiz", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.cwiz",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.cwiz", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.cwiz", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+        { "name": "constant.numeric.cwiz", "match": "\\b[0-9]+(\\.[0-9]+)?\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.cwiz",
+          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto|sizeof)\\b"
+        },
+        {
+          "name": "storage.modifier.cwiz",
+          "match": "\\b(const|static|volatile|inline|extern|struct|enum|typedef)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.cwiz",
+          "match": "\\b(void|int|char|bool|byte|short|long|unsigned|signed|rom8|rom16|int8|int16|arr)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.cwiz",
+          "match": "\\b(clear|pixel|hline|vline|rect|fillrect|line|circle|disc|text|char|print|num|key|key_hit|key_down|wait_key|delay|abs|min|max|rand|peek|poke|rpeek|rpoke|_rpeek)\\b"
+        },
+        {
+          "name": "constant.language.key.cwiz",
+          "match": "\\bK_[A-Z0-9_]+\\b"
+        },
+        {
+          "name": "constant.language.cwiz",
+          "match": "\\b(NULL|true|false)\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.cwiz",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    }
+  }
+}

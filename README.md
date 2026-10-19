@@ -32,6 +32,10 @@ void main() {
 $ ./build.sh                              # configure + build the toolchain into ./build
 $ build/wizc examples/01_hello.wz         # -> examples/01_hello.bin (+ .asm listing)
 $ build/wizrun examples/01_hello.wz       # build, run in the simulator, print the LCD
+
+# a #cwapp program is patched into the built-in 580 ROM; #slot picks the menu slot
+$ build/wizc examples/cwiz/10_app_hello.cwiz -o app.bin
+$ build/wizrun app.bin 580
 ```
 
 ---
@@ -107,7 +111,8 @@ preprocessor (`#define`, `#if`, `#include`, `#for`, …) before parsing; Wiz has
 ## Targets
 
 A single source file can carry code for more than one machine using `<target>` sections: `for 580` /
-`for 880` in Wiz, or the same headers written as directives (`#for 580`, `#cwapp`) in CWiz.
+`for 880` in Wiz, or the same headers written as directives (`#for 580`, `#cwapp`, and
+`#slot n` for the menu slot) in CWiz.
 
 | Target | Chip | CPU core | ROM | Variables | LCD | Notes |
 |--------|------|----------|-----|-----------|-----|-------|
@@ -136,7 +141,8 @@ compiler/
     targets.hpp/.cpp  target table: 580/cw, 880/cwii, cwapp
     asm.hpp/.cpp      the nX-U8/nX-U16 assembler
     sim.hpp/.cpp      the U8 simulator (nX-U8 + nX-U16)
-    font6x8.hpp       generated 6x8 font table
+    font6x8.hpp       generated 6x8 CW Mono font table (char/text/num)
+    font8x8.hpp       generated 8px CW Text + CW Mono tables (print)
     wiz.hpp/.cpp      the Wiz front end + codegen
     cwiz.hpp/.cpp     the CWiz front end + codegen (independent)
     build.hpp/.cpp    shared pipeline: boot + body + runtime -> ROM

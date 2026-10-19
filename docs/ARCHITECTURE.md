@@ -185,7 +185,12 @@ The feature set matches Wiz, but a few names must differ because C reserves them
 
 The prelude (the CWiz standard library) is emitted as source and parsed at start-up; the same
 on-demand selection applies — only the routines a program references are kept, and a user
-definition of the same name wins. The 6×8 font is injected as a generated `rom8 _font[760]` table.
+definition of the same name wins. The 6×8 CW Mono font is injected as a generated
+`rom8 _font[760]` table. The two print sets pull in their own 8-pixel tables on demand:
+`print()` uses `_font_big[760]` (CW Mono 8×8, fixed 8 px advance); `print_text()` uses
+`_font_text[760]` (CW Text 8×8 with CW Mono fallbacks, also fixed 8 px advance). Both sets share
+the same cell metrics, so mixing calls cannot glitch the layout. A program using `text()`/`num()`
+does not pay for the 8-pixel tables.
 
 CWiz's default target is `880`.
 

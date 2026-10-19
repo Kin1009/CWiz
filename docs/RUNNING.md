@@ -74,8 +74,8 @@ The detail line reports the target, the number of **variables** (2 bytes each) a
 | Option | Meaning |
 |--------|---------|
 | `-o FILE` | write the ROM image to `FILE` (the `.asm` listing is written next to it) |
-| `--target 580\|880` | target calculator (default: `880`, or `WIZ_TARGET`) |
-| `--cwapp` | build an fx-580VN X firmware patch (implies `--target 580`) |
+| `--target 580\|880` | target calculator (default: `880`, or `WIZ_TARGET`; a `#cwapp` source implies 580) |
+| `--cwapp` | accepted for old scripts; no longer needed (a `#cwapp` section patches automatically) |
 | `--lang wiz\|cwiz` | force the input language (default: by extension) |
 | `-S` | stop after assembly: write the `.asm` listing, no `.bin` |
 | `-E`, `--pp` | preprocess only: expand directives (CWiz) or pick the target's sections (Wiz) and print the result to stdout, like `gcc -E` |
@@ -150,17 +150,26 @@ to read results back out of the simulator. See [API.md](API.md#c-api).
 ## The simulator (`wizrun`)
 
 ```
-build/wizrun [options] file
+build/wizrun [options] file.bin [580|880]
 ```
 
-`wizrun` compiles the program with the same front end as `wizc` and runs it on the bundled
-simulator, printing the LCD as text (by default at half resolution — pass `--full` for every
-pixel).
+`wizrun` loads a compiled image and runs it on the bundled simulator, printing the LCD as text (by
+default at half resolution — pass `--full` for every pixel). A `.bin` defaults to the **580** model.
+A `.cwiz`/`.wz` source is accepted too and built with the same front end as `wizc` (it keeps
+`wizc`'s target rules unless you name a model); a `#cwapp` source is patched into the built-in 580
+ROM and started directly.
+
+```console
+$ build/wizc examples/cwiz/10_app_hello.cwiz -o hello.bin
+$ build/wizrun hello.bin 580
+```
+
+A `.bin` that already carries the cwapp hook (the last bytes at `25E1E` are `00 F3 40 0E`) is
+started at its app entry; any other image runs from its reset vector.
 
 | Option | Meaning |
 |--------|---------|
-| `--target 580\|880` | target calculator (default `880`) |
-| `--cwapp` | build the `cwapp` firmware-patch target |
+| `--target 580\|880` | target calculator (default `580`) |
 | `--steps N` | step budget (default 3 000 000). Games need more; try 20 000 000. |
 | `--keys K,K,…` | keys held down for the whole run (`K_*` name or a number) |
 | `--press K@N` | press key `K` starting at step `N` (comma-separate several) |
@@ -172,14 +181,14 @@ pixel).
 $ build/wizrun examples/03_keys.wz --keys K_RIGHT --steps 3000000
               ##
               ...
-ran examples/03_keys.wz  (stopped: max steps, 3000000 steps)
+ran examples/03_keys.wz  (880, stopped: max steps, 3000000 steps)
 ```
 
 The last line above the screen is the stop reason and the step count — useful to tell a finished
 program (`halt: B to self at XXXX`) from one that is still looping (`max steps`), and to catch
 faults (`unknown opcode …`, `write to ROM at …`).
 
-`wizrun` only uses the first source file given. It runs each `--press` by advancing the simulator to
+`wizrun` only uses the first file given. It runs each `--press` by advancing the simulator to
 that step, then adding the key to the held set.
 
 You can also drive the simulator directly (for scripted checks):
@@ -280,6 +289,36 @@ If your goal is the **fx-580VN X**, see the next section — that path is suppor
 
 ## Patching a program into an fx-580VN X firmware (`cwapp`)
 
+`wizc` embeds the 580 ROM and does the patch for you. Write the app section and choose the menu
+slot with `#slot`:
+
+```cwiz
+#for 580
+void leave() { }
+#cwapp
+#slot 3
+void leave() { exit(); }
+----
+
+void main() {
+    clear();
+    text(4, 4, "Hello");
+    while (1) { }
+}
+```
+
+```console
+$ build/wizc app.cwiz -o app.bin
+CC app.cwiz -> app.bin
+    [580 ML620906 nX-U16/100 (firmware patch) slot 3] 1 variables, 262144 bytes ROM
+$ build/wizrun app.bin 580
+```
+
+The `.bin` is a complete 256 KB ROM with the hook and menu slot already set. `#slot` takes
+`1..12` and must appear after `#cwapp`; without it, slot 2 is used. No `--cwapp` flag is needed.
+
+The lower-level `patch_menu` tool is still available for patching an external dump:
+
 ```
 build/patch_menu rom.bin app.wz out.bin [--slot 1..12] [--mode E0] [--force]
 ```
@@ -305,8 +344,8 @@ patch_menu patched.bin
     not tested on real firmware - try it in the emulator first
 ```
 
-The default slot is **2**; `--slot` accepts `1..12`. Only `--mode E0` is currently wired into the
-trampoline.
+The default slot is the source's `#slot n`, otherwise **2**; `--slot` overrides it and accepts
+`1..12`. Only `--mode E0` is currently wired into the trampoline.
 
 Safety checks built in: the tool refuses a ROM of the wrong size (an fx-580VN X dump is 262144
 bytes), a ROM whose menu table does not look like the expected layout, a ROM whose hook bytes

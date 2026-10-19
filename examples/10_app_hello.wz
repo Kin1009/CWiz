@@ -1,5 +1,7 @@
 # cwapp target: a program that lives in segment 3 of an fx-580VN X firmware ROM,
-# entered from a menu icon (see patch_menu). Press AC to leave and re-open the menu.
+# entered from a menu icon.  `wizc` detects the `for cwapp` section and patches the
+# built-in 580 ROM automatically (slot 2 unless the CWiz twin sets `#slot n`).
+# Press AC to leave and re-open the menu.
 # The `for cwapp` block is only compiled for the cwapp target; after a separator the
 # code is common, so the same file also builds as a normal `cw` program.
 

@@ -13,7 +13,7 @@ $ build/wizrun examples/cwiz/01_hello.cwiz
 ```
 
 Most Wiz examples are written to be target-independent and build unchanged for either machine
-(`--target 580` or `--target 880`). `10_app_hello.wz` is `cwapp`-only;
+(`--target 580` or `--target 880`). `10_app_hello.wz` is `cwapp`-only (the compiler detects the `for cwapp` section and patches the built-in 580 ROM automatically);
 `cwiz/10_app_hello.cwiz` uses `#for 580` / `#cwapp` sections to build for both.
 
 ## Wiz
@@ -27,7 +27,7 @@ Most Wiz examples are written to be target-independent and build unchanged for e
 | `05_pong.wz` | A complete two-paddle Pong: `fillrect` gameplay, an opponent that tracks the ball, a score strip, a win screen. Read this to see a real game loop. |
 | `06_demo.wz` | Recursion (`fib`), a loop (`fact`), `print` layout, and `key_hit` edge detection. |
 | `07_catch.wz` | A reflex game using `rand`, `key_down`, `rect`/`fillrect`, and a status line. (Comments are in Vietnamese.) |
-| `10_app_hello.wz` | A `cwapp` program: a `for cwapp` section with `exit()`, patchable into an fx-580VN X menu. It declares only the `cwapp` target, so build it with `--cwapp`. |
+| `10_app_hello.wz` | A `cwapp` program: a `for cwapp` section with `exit()`, patchable into an fx-580VN X menu. It declares only the `cwapp` target; `wizc 10_app_hello.wz` writes a complete, patched 580 ROM, and `wizrun app.bin 580` runs it. Add `#slot n` (CWiz only) to choose a menu slot other than 2. |
 
 ## CWiz
 
@@ -43,7 +43,7 @@ The same tour in C syntax, sharing the built-ins and the graphics library:
 | `06_demo.cwiz` | Recursion, functions with default arguments, `print`, and `abs` from the standard library. |
 | `07_preproc.cwiz` | The preprocessor: `#define` (object- and function-like), `#if`/`#ifdef`, `#include`, `__ROWS__`, and target sections written with the `#for` directive. It includes `07_hud.cwiz`, which is not a program but the shared HUD header. |
 | `08_pointers.cwiz` | Addresses and memory: `int*`/`char*`, `&`, `*p`, `p[i]`, pointer arithmetic, and a `char` string buffer (see [GUIDE §20.2](../docs/GUIDE.md#202-pointers-and-memory)). |
-| `10_app_hello.cwiz` | The CWiz twin of `10_app_hello.wz`: an fx-580VN X firmware app. `#for 580` / `#cwapp` sections pick `leave()` per target, so the same file builds as a plain 580 ROM or as the app (`--cwapp`). |
+| `10_app_hello.cwiz` | The CWiz twin of `10_app_hello.wz`: an fx-580VN X firmware app. `#for 580` / `#cwapp` sections pick `leave()` per target, so the same file builds as a plain 580 ROM or as the patched app; `#slot 2` chooses the menu slot. |
 
 ## A good reading order
 

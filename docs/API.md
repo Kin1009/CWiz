@@ -16,15 +16,23 @@ coloured output (auto-detected TTY, `NO_COLOR`, `--color=auto|always|never`).
 | Tool | Usage |
 |------|-------|
 | `wizc`         | `wizc [options] file…` — compile `.wz` / `.cwiz` to `<name>.bin` (+ `<name>.asm`) |
-| `wizrun`       | `wizrun [options] file` — compile and run in the simulator, print the LCD |
+| `wizrun`       | `wizrun [options] file.bin [580\|880]` — run an image in the simulator |
 | `customromrun` | `customromrun --model 580\|880 rom.bin` — run a custom ROM on a CasioEmuMsvc model |
 | `patch_menu`   | `patch_menu rom.bin app.wz out.bin` — patch a program into an fx-580VN X firmware |
 | `wiztests`     | `wiztests` — run the toolchain test suite |
 
-`wizc` options: `-o FILE`, `--target 580|880`, `--cwapp`, `--lang wiz|cwiz`, `-S` (listing only),
+`wizc` options: `-o FILE`, `--target 580|880`, `--lang wiz|cwiz`, `-S` (listing only),
 `-E`/`--pp` (print the preprocessed/selected source), `--no-asm`, `--color[=WHEN]`, `-v`,
-`--version`, `-h`.
-`wizrun` options: `--target`, `--cwapp`, `--steps N`, `--keys LIST`, `--press LIST`, `--full`,
+`--version`, `-h`.  `--cwapp` is accepted for old scripts but is no longer needed: a source with a
+`#cwapp` section is built and patched automatically, and `#slot n` picks the menu slot.
+
+`wizc` embeds a 256 KB fx-580VN X ROM.  For a `#cwapp` source the `.bin` output is the complete,
+already-patched ROM.  `wizrun` then only has to load that `.bin` and run it:
+`wizrun app.bin 580` (a compiled image defaults to the 580 model; 880 images can be run with
+`880`).
+`wizrun` also accepts a `.wz`/`.cwiz` source and builds it first.
+
+`wizrun` options: `--target`, `--steps N`, `--keys LIST`, `--press LIST`, `--full`,
 `--color`, `-v`, `--version`, `-h`.
 Full details in [RUNNING.md](RUNNING.md).
 
@@ -113,18 +121,32 @@ All coordinates are clipped to the visible screen. `c` is the colour: non-zero d
 | `sprite(x, y, w, h, data)` | — | Draw a 1-bit-per-pixel bitmap; `data` is a `rom8` table (or table + offset). |
 
 CWiz names its glyph helper `glyph` because `char` is a reserved word (it is a type). Wiz names it
-`char`.
+`char`. `char`/`text`/`num` use the **6×8 CW Mono** font.
 
 ### `print`
 
-`print(x, y, a, b, c, …)` lays out its arguments left to right, starting at `(x, y)`, and returns
-the final `x`. Each argument is rendered as **text** if it is a string literal or the name of a
-`rom8` table, and as a **number** otherwise. It is expanded by the compiler into a chain of
-`text`/`num` calls (so it needs at least three arguments).
+There are **two print sets**, one per CW font. Both take `(x, y, value, …)`, lay their arguments
+out left to right, need at least three arguments, and return the final `x`. Both render at their
+font's native 8-pixel size; nothing is scaled.
+
+| Call | Font set | Strings | Numbers | Advance |
+|------|----------|---------|---------|---------|
+| `print(x, y, …)` | **CW Mono** | CW Mono 8×8 | CW Mono 8×8 | 8 px |
+| `print_text(x, y, …)` | **CW Text** | CW Text 8×8 | CW Text 8×8 / CW Mono fallback | 8 px |
+
+The sets are independent: `print` never switches to CW Text, and `print_text` never switches to
+CW Mono except where CW Text has no glyph (it has no digits and only a subset of ASCII). The
+fallback glyph is baked into the CW Text table at the same 8×8 size, so both sets keep identical
+metrics and cannot drift.
 
 ```python
-print(4, 4, "Score ", score, " / ", 100)    # -> "Score 42 / 100"
+print(4, 4, "Score ", score, " / ", 100)       # all CW Mono
+print_text(4, 20, "Score ", score, " / ", 100) # all CW Text
 ```
+
+The compiler expands these into the internal `_mtext`/`_mnum` (CW Mono) and `_ptext`/`_ptnum`
+(CW Text) helpers. The lower-level `text()` and `num()` calls still use the original 6×8 CW Mono
+font and a fixed 6 px advance.
 
 ---
 
@@ -224,7 +246,8 @@ build/wizc prog.wz [out.bin] [--target 580|880]
 - Section syntax (`for 580` / `for 880` / `for cwapp` / `for all`, separated by `-----`) is
   described in [GUIDE §17](GUIDE.md#17-one-file-several-machines). Line numbers are preserved across
   sections so errors point at the right line. In CWiz the same headers can be written as directives
-  — `#for 580`, `#for 880`, and `#cwapp` for the fx-580VN X firmware-app section
+  — `#for 580`, `#for 880`, `#cwapp` for the fx-580VN X firmware-app section, and
+  `#slot n` (1..12) for the menu slot the compiler patches
   ([GUIDE §20.1](GUIDE.md#201-preprocessor-directives)).
 
 ---
@@ -359,7 +382,15 @@ and pointer arithmetic all compile to plain loads and stores through a register 
 
 ```cpp
 std::string preprocess_cwiz(const std::string& src, const std::string& file,
-                            const std::string& target);   // target: cw | cwii | cwapp
+                            const std::string& target);
+
+struct CwizPreprocessInfo {
+    std::string text;
+    bool has_cwapp;
+    int slot;  // #slot n, default 2
+};
+CwizPreprocessInfo preprocess_cwiz_info(const std::string& src, const std::string& file,
+                                        const std::string& target);   // target: cw | cwii | cwapp
 
 struct CwizOrigin { std::string file; int line = 0; };
 CwizOrigin cwiz_line_origin(int line);                    // output line -> real file:line
@@ -371,7 +402,8 @@ CwizPos cwiz_error_pos(const std::string& fallback_file, int line);
 `preprocess_cwiz` expands C-style directives (`#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`,
 `#ifdef`/`#ifndef`, `#include`, `#pragma once`, `#error`), rewrites `#for 580, 880` /
 `#for 880` into the `for …` target-section headers the section filter understands, accepts `#cwapp`
-as the marker for an fx-580VN X firmware-app section, and defines `__CWIZ__`, one of
+as the marker for an fx-580VN X firmware-app section, accepts `#slot n` (1..12, only after
+`#cwapp`) and reports it through `CwizPreprocessInfo`, and defines `__CWIZ__`, one of
 `__CW__` / `__CWII__` / `__CWAPP__`, and `__ROWS__`.
 
 The output is **line-preserving** — a directive line becomes an empty line — so errors from later
@@ -387,6 +419,8 @@ struct BuildResult {
     std::string full_asm;
     std::map<std::string, int> variables;   // name -> RAM address
     std::map<std::string, int> syms;        // assembler symbol table
+    bool cwapp;                             // compiled for the fx-580VN X menu
+    int slot;                               // #slot n (1..12); default 2
 };
 
 void set_data_dir(const std::string& dir);
@@ -408,6 +442,40 @@ std::string language_of(const std::string& path, const std::string& forced = "")
 `"wiz"` / `"cwiz"`. `build_source` throws `CompileError` (compiler) or `AsmError` (assembler).
 For a CWiz source `build_cwiz` runs `preprocess_cwiz` and then `select_sections` before compiling;
 the error-excerpt helpers that follow an `#include` are in [`cpre.hpp`](#cprehpp--the-cwiz-preprocessor).
+
+### `patch.hpp` — the fx-580VN X menu patcher
+
+```cpp
+struct RomPatchReport {
+    bool ok;
+    std::string error;
+    std::vector<std::string> warnings, changes;
+    std::vector<uint8_t> rom;   // 262144 bytes when ok
+    int code_size, slot;
+    uint32_t app_entry;
+    bool hook_forced;
+};
+
+RomPatchReport patch_rom(std::vector<uint8_t> rom, const std::string& source,
+                         const std::string& source_name, int slot, bool force,
+                         bool allow_hook_mismatch);
+RomPatchReport patch_rom_image(std::vector<uint8_t> rom, const BuildResult& image,
+                               int slot, bool force, bool allow_hook_mismatch);
+```
+
+`slot == 0` means “use the source's `#slot n`, or 2”. `patch_rom` compiles the source first;
+`patch_rom_image` patches an image that was already compiled (`wizc` uses this). The engine is
+shared by `wizc`, `patch_menu` and the debugger's Wiz editor.
+
+### `builtin_rom.hpp` — the embedded 580 firmware
+
+```cpp
+extern const unsigned char kFx580VnRom[];   // 262144 bytes
+extern const std::size_t kFx580VnRomSize;
+```
+
+Generated by `compiler/tools/embed_rom.py` from `emulator/models/fx-580VN X/rom.bin`. It lets
+`wizc` patch a `#cwapp` program without asking for a ROM path.
 
 ### `asm.hpp` — the assembler
 

@@ -1,9 +1,8 @@
 // 10_app_hello.cwiz - a cwapp program in CWiz: the CWiz twin of
 // examples/10_app_hello.wz.
 //
-//   wizc  examples/cwiz/10_app_hello.cwiz                 (builds for 580)
-//   wizc  examples/cwiz/10_app_hello.cwiz --cwapp         (builds the firmware app)
-//   wizrun examples/cwiz/10_app_hello.cwiz --cwapp
+//   wizc  examples/cwiz/10_app_hello.cwiz -o hello.bin   (patched 580 ROM)
+//   wizrun hello.bin 580
 //
 // cwapp is a program that lives in segment 3 of an fx-580VN X firmware ROM and
 // is entered from a menu icon (see patch_menu). `exit()` returns to the menu.
@@ -14,7 +13,8 @@
 // built for every target:
 //
 //     #for 580        the 580 calculator (a normal ROM file)
-//     #cwapp          the app: a 580VN X firmware patch (needs `--cwapp`)
+//     #cwapp          the app: patched into the built-in 580 ROM
+//     #slot 2         replace menu slot 2 (1..12)
 //     ----            back to code that every target gets
 //
 // So leave() exists twice - as a no-op on 580, as exit() on cwapp - while
@@ -24,6 +24,7 @@
 #for 580
 void leave() { }
 #cwapp
+#slot 2
 void leave() { exit(); }
 ----
 

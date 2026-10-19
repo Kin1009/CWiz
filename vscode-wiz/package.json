@@ -1,0 +1,135 @@
+{
+  "name": "wiz-cwiz",
+  "displayName": "Wiz / CWiz",
+  "description": "Syntax highlighting, snippets and a linter for the Wiz (.wz) and CWiz (.cwiz) languages of the Casio ClassWiz toolchain.",
+  "version": "1.1.0",
+  "publisher": "Kin1009",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "casio",
+    "classwiz",
+    "calculator",
+    "wiz",
+    "cwiz"
+  ],
+  "activationEvents": [
+    "onLanguage:wiz",
+    "onLanguage:cwiz",
+    "onCommand:wiz.build",
+    "onCommand:wiz.lint"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "wiz",
+        "aliases": [
+          "Wiz",
+          "wiz"
+        ],
+        "extensions": [
+          ".wz"
+        ],
+        "configuration": "./language-configuration-wiz.json"
+      },
+      {
+        "id": "cwiz",
+        "aliases": [
+          "CWiz",
+          "cwiz"
+        ],
+        "extensions": [
+          ".cwiz"
+        ],
+        "configuration": "./language-configuration-cwiz.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "wiz",
+        "scopeName": "source.wiz",
+        "path": "./syntaxes/wiz.tmLanguage.json"
+      },
+      {
+        "language": "cwiz",
+        "scopeName": "source.cwiz",
+        "path": "./syntaxes/cwiz.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "wiz",
+        "path": "./snippets/wiz.json"
+      },
+      {
+        "language": "cwiz",
+        "path": "./snippets/cwiz.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "wiz.lint",
+        "title": "Wiz: Lint the current file"
+      },
+      {
+        "command": "wiz.build",
+        "title": "Wiz: Build the current file with wizc"
+      }
+    ],
+    "configuration": {
+      "title": "Wiz / CWiz",
+      "properties": {
+        "wiz.lint.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint .wz/.cwiz files when they are saved."
+        },
+        "wiz.lint.onType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint while typing (debounced)."
+        },
+        "wiz.lint.lineLength": {
+          "type": "number",
+          "default": 100,
+          "description": "Report lines longer than this many columns."
+        },
+        "wiz.compilerPath": {
+          "type": "string",
+          "default": "wizc",
+          "description": "Path to the wizc compiler used by 'Wiz: Build'."
+        },
+        "wiz.lint.useCompiler": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also run wizlint --json for saved files. Falls back to the built-in linter when wizlint is not installed."
+        },
+        "wiz.lint.compilerPath": {
+          "type": "string",
+          "default": "wizlint",
+          "description": "Path to the wizlint executable used for compiler diagnostics."
+        },
+        "wiz.lint.target": {
+          "type": "string",
+          "enum": [
+            "580",
+            "880",
+            "cwapp"
+          ],
+          "default": "580",
+          "description": "Target passed to wizlint for compiler diagnostics."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "node scripts/package.js"
+  }
+}

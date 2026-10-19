@@ -5,6 +5,7 @@
 #include <string>
 
 #include "font6x8.hpp"
+#include "font8x8.hpp"
 #include "harness.hpp"
 
 using namespace wt;
@@ -34,6 +35,76 @@ bool subset(const std::set<std::pair<int, int>>& a, const std::set<std::pair<int
     return true;
 }
 
+void bigchar_ref(std::set<std::pair<int, int>>& out, int x, int y, int c) {
+    if (c < 32 || c > 126) c = '?';
+    int base = (c - 32) * 8;
+    for (int r = 0; r < 8; r++)
+        for (int k = 0; k < 8; k++)
+            if (FONT8X8[base + r] & (0x80 >> k)) out.insert({x + k, y + r});
+}
+
+// print() uses the CW Mono set at 8 px, fixed 8 px advance, for text too.
+int mono_text_ref(std::set<std::pair<int, int>>& out, int x, int y, const std::string& s) {
+    for (unsigned char c : s) {
+        bigchar_ref(out, x, y, c);
+        x += 8;
+    }
+    return x;
+}
+
+int tchar_ref(std::set<std::pair<int, int>>& out, int x, int y, int c) {
+    if (c < 32 || c > 126) c = '?';
+    int base = (c - 32) * 8;
+    for (int r = 0; r < 8; r++)
+        for (int k = 0; k < 8; k++)
+            if (FONT_TEXT8[base + r] & (0x80 >> k)) out.insert({x + k, y + r});
+    return 8;
+}
+
+// print_text() uses the CW Text set in the same 8x8 cell / 8 px advance.
+int text8_ref(std::set<std::pair<int, int>>& out, int x, int y, const std::string& s) {
+    for (unsigned char c : s) x += tchar_ref(out, x, y, c);
+    return x;
+}
+
+// CW Mono numbers (print): 8x8 cells, 8 px per digit.
+int num8_ref(std::set<std::pair<int, int>>& out, int x, int y, int n) {
+    if (n == -32768) return mono_text_ref(out, x, y, "-32768");
+    if (n < 0) {
+        bigchar_ref(out, x, y, 45);
+        x += 8;
+        n = -n;
+    }
+    for (int d = 10000, shown = 0; d > 0; d /= 10) {
+        int q = n / d;
+        n -= q * d;
+        if (q > 0 || shown || d == 1) {
+            bigchar_ref(out, x, y, 48 + q);
+            x += 8;
+            shown = 1;
+        }
+    }
+    return x;
+}
+
+// CW Text numbers (print_text): variable advances, mono fallback for digits.
+int ptnum8_ref(std::set<std::pair<int, int>>& out, int x, int y, int n) {
+    if (n == -32768) return text8_ref(out, x, y, "-32768");
+    if (n < 0) {
+        x += tchar_ref(out, x, y, 45);
+        n = -n;
+    }
+    for (int d = 10000, shown = 0; d > 0; d /= 10) {
+        int q = n / d;
+        n -= q * d;
+        if (q > 0 || shown || d == 1) {
+            x += tchar_ref(out, x, y, 48 + q);
+            shown = 1;
+        }
+    }
+    return x;
+}
+
 }  // namespace
 
 void wt::run_v03b() {
@@ -44,15 +115,42 @@ void wt::run_v03b() {
                           "    print(2, 20, name)\n    e = print(2, 40, 123)\n"
                           "    print(100, 40, e)\n";
         Machine r = build_and_run(src);
-        std::set<std::pair<int, int>> exp = text_ref(2, 3, "Score 42 of -7");
-        for (auto& p : text_ref(2, 20, "Bob")) exp.insert(p);
-        for (auto& p : text_ref(2, 40, "123")) exp.insert(p);
-        for (auto& p : text_ref(100, 40, std::to_string(2 + 18))) exp.insert(p);
+        std::set<std::pair<int, int>> exp;
+        int x = mono_text_ref(exp, 2, 3, "Score ");
+        x = num8_ref(exp, x, 3, 42);
+        x = mono_text_ref(exp, x, 3, " of ");
+        num8_ref(exp, x, 3, -7);
+        mono_text_ref(exp, 2, 20, "Bob");
+        int end = num8_ref(exp, 2, 40, 123);
+        num8_ref(exp, 100, 40, end);
         auto got = lit(r.m);
         std::set<std::pair<int, int>> sym;
         std::set_symmetric_difference(got.begin(), got.end(), exp.begin(), exp.end(),
                                       std::inserter(sym, sym.begin()));
-        check("print: strings + numbers chained, rom8 name as text, returns end x", got == exp,
+        check("print (CW Mono): text + numbers chained, rom8 name, returns end x", got == exp,
+              ss(sym));
+    }
+
+    // ---------------- print_text (CW Text set)
+    {
+        std::string src = "\nrom8 name = \"Bob\"\ndef main():\n    score = 42\n"
+                          "    print_text(2, 3, \"Score \", score, \" of \", -7)\n"
+                          "    print_text(2, 20, name)\n    e = print_text(2, 40, 123)\n"
+                          "    print_text(100, 40, e)\n";
+        Machine r = build_and_run(src);
+        std::set<std::pair<int, int>> exp;
+        int x = text8_ref(exp, 2, 3, "Score ");
+        x = ptnum8_ref(exp, x, 3, 42);
+        x = text8_ref(exp, x, 3, " of ");
+        ptnum8_ref(exp, x, 3, -7);
+        text8_ref(exp, 2, 20, "Bob");
+        int end = ptnum8_ref(exp, 2, 40, 123);
+        ptnum8_ref(exp, 100, 40, end);
+        auto got = lit(r.m);
+        std::set<std::pair<int, int>> sym;
+        std::set_symmetric_difference(got.begin(), got.end(), exp.begin(), exp.end(),
+                                      std::inserter(sym, sym.begin()));
+        check("print_text (CW Text): text + numbers chained, proportional advances", got == exp,
               ss(sym));
     }
 
@@ -153,18 +251,24 @@ void wt::run_v03b() {
     {
         std::string text = wiz::read_text_file(root_path("examples/06_demo.wz"));
         Machine r = run_src(text, "", {}, 8000000);
+        auto print_line = [](int x, int y, const std::string& label, int value) {
+            std::set<std::pair<int, int>> s;
+            int nx = mono_text_ref(s, x, y, label);
+            num8_ref(s, nx, y, value);
+            return s;
+        };
         check("demo: n=5 -> fib=5, 5!=120 shown",
-              subset(text_ref(4, 11, "n = 5"), lit(r.m)) &&
-                  subset(text_ref(4, 21, "fib = 5"), lit(r.m)) &&
-                  subset(text_ref(4, 31, "n! = 120"), lit(r.m)));
+              subset(print_line(4, 11, "n = ", 5), lit(r.m)) &&
+                  subset(print_line(4, 21, "fib = ", 5), lit(r.m)) &&
+                  subset(print_line(4, 31, "n! = ", 120), lit(r.m)));
         r.m.keys = {key_pair(KC.at("K_UP"))};
         r.m.run(r.m.steps + 6000000);
         r.m.keys.clear();
         r.m.run(r.m.steps + 6000000);
         check("demo: UP -> n=6, fib=8, 6!=720, presses=1",
-              subset(text_ref(4, 11, "n = 6"), lit(r.m)) &&
-                  subset(text_ref(4, 21, "fib = 8"), lit(r.m)) &&
-                  subset(text_ref(4, 31, "n! = 720"), lit(r.m)) &&
-                  subset(text_ref(4, 41, "presses: 1"), lit(r.m)));
+              subset(print_line(4, 11, "n = ", 6), lit(r.m)) &&
+                  subset(print_line(4, 21, "fib = ", 8), lit(r.m)) &&
+                  subset(print_line(4, 31, "n! = ", 720), lit(r.m)) &&
+                  subset(print_line(4, 41, "presses: ", 1), lit(r.m)));
     }
 }

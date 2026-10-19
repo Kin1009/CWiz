@@ -1,0 +1,65 @@
+{
+  "Wiz program": {
+    "prefix": "wiz",
+    "body": [
+      "# ${1:program} - Wiz",
+      "def main():",
+      "    clear()",
+      "    text(8, 8, \"${2:Hello, Wiz!}\")",
+      "    wait_key()",
+      "",
+      "main()"
+    ],
+    "description": "A minimal Wiz program"
+  },
+  "CWiz app section": {
+    "prefix": "cwapp",
+    "body": [
+      "#for 580",
+      "#cwapp",
+      "int main() {",
+      "    clear();",
+      "    text(4, 4, \"${1:Hello from CWiz}\");",
+      "    wait_key();",
+      "    return 0;",
+      "}"
+    ],
+    "description": "#cwapp section (requires #for 580)"
+  },
+  "if / else": {
+    "prefix": "if",
+    "body": ["if ${1:condition}:", "    ${2:pass}", "else:", "    ${3:pass}"],
+    "description": "if/else block"
+  },
+  "for range": {
+    "prefix": "for",
+    "body": ["for ${1:i} in range(${2:0}, ${3:10}):", "    ${4:pass}"],
+    "description": "for loop over a range"
+  },
+  "while": {
+    "prefix": "while",
+    "body": ["while ${1:True}:", "    ${2:pass}"],
+    "description": "while loop"
+  },
+  "function": {
+    "prefix": "def",
+    "body": ["def ${1:name}(${2:args}):", "    ${3:pass}"],
+    "description": "function definition"
+  },
+  "text": {
+    "prefix": "text",
+    "body": ["text(${1:x}, ${2:y}, \"${3:hello}\")"],
+    "description": "draw text on the LCD"
+  },
+  "key loop": {
+    "prefix": "keyloop",
+    "body": [
+      "while True:",
+      "    k = key()",
+      "    if k == K_AC:",
+      "        break",
+      "    delay(2)"
+    ],
+    "description": "poll the keyboard until AC"
+  }
+}

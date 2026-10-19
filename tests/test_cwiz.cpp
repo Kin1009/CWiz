@@ -1,6 +1,8 @@
 // test_cwiz.cpp - CWiz language tests (ported from tests/test_cwiz.py).
+#include <set>
 #include <string>
 
+#include "font8x8.hpp"
 #include "harness.hpp"
 
 using namespace wt;
@@ -251,6 +253,34 @@ void wt::run_cwiz() {
         for (int x = 0; x < 60; x++)
             for (int y = 0; y < 8; y++) any = any || pix1(r.m, x, y);
         check("print() compiles and runs", var_of(r.m, r.vars, "R") == 1 && any);
+    }
+    {
+        // print() is the CW Mono set: all glyphs 8x8, 8 px advance.
+        Machine r = run("void main() { clear(); print(0, 0, \"A\", 1); }");
+        std::set<std::pair<int, int>> exp;
+        int base = ('A' - 32) * 8;
+        for (int y = 0; y < 8; y++)
+            for (int k = 0; k < 8; k++)
+                if (FONT8X8[base + y] & (0x80 >> k)) exp.insert({k, y});
+        base = ('1' - 32) * 8;
+        for (int y = 0; y < 8; y++)
+            for (int k = 0; k < 8; k++)
+                if (FONT8X8[base + y] & (0x80 >> k)) exp.insert({8 + k, y});
+        check("print() uses the CW Mono set", lit(r.m) == exp);
+    }
+    {
+        // print_text() is the CW Text set, also in 8x8 cells with 8 px advance.
+        Machine r = run("void main() { clear(); print_text(0, 0, \"A\", 1); }");
+        std::set<std::pair<int, int>> exp;
+        int base = ('A' - 32) * 8;
+        for (int y = 0; y < 8; y++)
+            for (int k = 0; k < 8; k++)
+                if (FONT_TEXT8[base + y] & (0x80 >> k)) exp.insert({k, y});
+        base = ('1' - 32) * 8;
+        for (int y = 0; y < 8; y++)
+            for (int k = 0; k < 8; k++)
+                if (FONT_TEXT8[base + y] & (0x80 >> k)) exp.insert({8 + k, y});
+        check("print_text() uses the CW Text set", lit(r.m) == exp);
     }
     {
         Machine r = run("int R; void main() { srand(1); R = rand(100); }");

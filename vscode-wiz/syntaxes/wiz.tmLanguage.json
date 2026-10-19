@@ -1,0 +1,95 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Wiz",
+  "scopeName": "source.wiz",
+  "patterns": [
+    { "include": "#directives" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#definitions" }
+  ],
+  "repository": {
+    "directives": {
+      "patterns": [
+        {
+          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot)\\b(.*)$",
+          "captures": {
+            "1": { "name": "punctuation.definition.directive.wiz" },
+            "2": { "name": "keyword.control.directive.wiz" },
+            "3": { "name": "string.unquoted.directive.wiz" }
+          }
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.number-sign.wiz", "match": "#.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.wiz",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.wiz", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.wiz",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.wiz", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.wiz", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+        { "name": "constant.numeric.wiz", "match": "\\b[0-9]+(\\.[0-9]+)?\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.wiz",
+          "match": "\\b(def|return|if|elif|else|for|while|break|continue|pass|and|or|not|in|is|True|False|None)\\b"
+        },
+        {
+          "name": "storage.type.wiz",
+          "match": "\\b(int|char|bool|byte|rom8|rom16|int8|int16|arr|void)\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.wiz",
+          "match": "\\b(clear|pixel|hline|vline|rect|fillrect|line|circle|disc|text|char|print|num|key|key_hit|key_down|wait_key|delay|abs|min|max|rand|peek|poke|rpeek|rpoke|_rpeek)\\b"
+        },
+        {
+          "name": "constant.language.key.wiz",
+          "match": "\\bK_[A-Z0-9_]+\\b"
+        }
+      ]
+    },
+    "definitions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.wiz",
+          "match": "\\bdef\\s+([A-Za-z_][A-Za-z0-9_]*)"
+        },
+        {
+          "name": "variable.other.wiz",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
+        }
+      ]
+    }
+  }
+}
