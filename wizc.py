@@ -128,7 +128,7 @@ def wait_key():
 ''',
     'hline': '''
 def hline(x0, x1, y, c=1):
-    if y < 0 or y > @LAST@:
+    if y < 0 or y > 63:
         return 0
     if x0 < 0:
         x0 = 0
@@ -144,8 +144,8 @@ def vline(x, y0, y1, c=1):
         return 0
     if y0 < 0:
         y0 = 0
-    if y1 > @ROWS@:
-        y1 = @ROWS@
+    if y1 > 64:
+        y1 = 64
     for y in range(y0, y1):
         pixel(x, y, c)
 ''',
@@ -265,6 +265,21 @@ def sprite(x, y, w, h, d):
         for k in range(0, w):
             b = _rpeek(d + r * bw + (k >> 3))
             if b & (128 >> (k & 7)):
+                pixel(x + k, y + r)
+'''
+
+PRELUDE['draw'] = '''
+def _hexv(c):
+    if c > 57:
+        return (c | 32) - 87
+    return c - 48
+
+def draw(x, y, h, w, s):
+    bw = (w + 7) >> 3
+    for r in range(0, h):
+        for k in range(0, w):
+            i = (r * bw + (k >> 3)) * 2 + ((k & 4) >> 2)
+            if _hexv(_rpeek(s + i)) & (8 >> (k & 3)):
                 pixel(x + k, y + r)
 '''
 
@@ -848,7 +863,6 @@ class Compiler:
         snippets = {}
         provider = {}
         for sid, text in PRELUDE.items():
-            text = text.replace('@ROWS@', str(self.target.rows)).replace('@LAST@', str(self.target.rows - 1))
             if self.target.rom_seg == 0:
                 text = text.replace('_rpeek(', 'peek(')    # ROM strings/sprites live in segment 0: plain peek
             sp = Parser(lex(text), consts).program()
@@ -899,9 +913,81 @@ class Compiler:
             return cur
         return node
 
+    def rewrite_draw(self, prog):
+        """draw(x, y, cao, dai, hex) with a constant size and a constant hex string (a literal, or a global
+        assigned once to a literal) becomes sprite(x, y, dai, cao, table) with the hex packed into a rom8 table.
+        Anything else is left to the run-time draw() in the library (hex digits only, no spaces)."""
+        if any(s[0] == 'def' and s[1] == 'draw' for s in prog):
+            return prog                      # the program has its own draw()
+        counts = {}
+
+        def count(n):
+            if isinstance(n, list):
+                for x in n:
+                    count(x)
+            elif isinstance(n, tuple):
+                if n and n[0] == 'assign' and len(n) > 2 and isinstance(n[1], str):
+                    counts[n[1]] = counts.get(n[1], 0) + 1
+                for x in n:
+                    count(x)
+        count(prog)
+        strs = {s[1]: s[2][1] for s in prog if s[0] == 'assign' and s[2][0] == 'str' and counts.get(s[1]) == 1}
+        data, newroms = {}, []
+
+        def pack(lit, h, w, ln):
+            txt = bytes(lit).decode('latin-1')
+            digits = re.sub(r'[\s_]', '', txt)
+            if re.search(r'[^0-9a-fA-F]', digits):
+                raise WizError('draw(): the hex string may only contain 0-9, a-f (spaces and _ are ignored)', ln)
+            if h <= 0 or w <= 0:
+                raise WizError('draw(): cao and dai must be positive', ln)
+            bw = (w + 7) >> 3
+            need = h * bw * 2
+            if len(digits) != need:
+                raise WizError('draw(): a %d x %d picture needs %d hex digits (%d rows x %d digits per row) but the string has %d'
+                               % (w, h, need, h, bw * 2, len(digits)), ln)
+            vals = tuple(int(digits[i:i + 2], 16) for i in range(0, need, 2))
+            if vals not in data:
+                data[vals] = '_draw%d' % len(data)
+                newroms.append(('rom', data[vals], 'rom8', list(vals), ln))
+            return data[vals]
+
+        def conv(n):
+            if isinstance(n, list):
+                return [conv(x) for x in n]
+            if not isinstance(n, tuple):
+                return n
+            n = tuple(conv(x) for x in n)
+            if len(n) == 4 and n[0] == 'call' and n[1] == 'draw':
+                args, ln = n[2], n[3]
+                if len(args) != 5:
+                    raise WizError('draw(x, y, cao, dai, hex) takes 5 arguments', ln)
+                x, y, h, w, s = args
+                lit = s[1] if s[0] == 'str' else (strs.get(s[1]) if s[0] == 'var' else None)
+                if lit is not None and h[0] == 'num' and w[0] == 'num':
+                    return ('call', 'sprite', [x, y, w, h, ('var', pack(lit, h[1], w[1], ln), ln)], ln)
+            return n
+        prog = conv(prog)
+        # a hex string that only draw() used does not need to stay in RAM/ROM as text
+        used = set()
+
+        def refs(n):
+            if isinstance(n, list):
+                for x in n:
+                    refs(x)
+            elif isinstance(n, tuple):
+                if n and n[0] == 'var' and len(n) > 1 and isinstance(n[1], str):
+                    used.add(n[1])
+                for x in n:
+                    refs(x)
+        refs([s for s in prog if not (s[0] == 'assign' and s[1] in strs)])
+        prog = [s for s in prog if not (s[0] == 'assign' and s[1] in strs and s[1] not in used)]
+        return prog + newroms
+
     def compile(self, src):
         consts = dict(key_consts(self.target.name))
         prog = Parser(lex(src), consts).program()
+        prog = self.rewrite_draw(prog)
         prog = self.rewrite_print(prog, {x[1] for x in prog if x[0] in ('rom', 'arr')})
         prog = self.add_prelude(prog, consts)
         top = []
