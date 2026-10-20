@@ -29,6 +29,8 @@
 
 namespace wt {
 
+void run_rop();
+
 // ---------------------------------------------------------------- reporting
 inline std::vector<std::string>& fails() {
     static std::vector<std::string> f;

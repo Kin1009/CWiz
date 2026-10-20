@@ -41,7 +41,10 @@ E0 E9                           backup address (where the payload was injected)
 74 1F 32 30                     sp = er6, pop er8
 ```
 
-The launcher copies the payload from `E9E0` to `D730` and continues there.
+The launcher copies the payload from `E9E0` to `D730` and continues there. The
+compiler therefore resolves payload-internal labels and string pointers against
+the execution address (`D730`), while still reporting/writing the injected
+payload at `#org` (`E9E0` by default).
 
 ### 880 common launcher
 
