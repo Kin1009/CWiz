@@ -4,6 +4,6 @@ def main():
     clear()
     a = 7
     b = 3
-    printLarge(4, 8, "a = ", a, "  b = ", b)
-    printMini(4, 24, "sum = ", a + b)
-    printMini(4, 40, "prod = ", a * b)
+    print(4, 8, "a = ", a, "  b = ", b)
+    print(4, 24, "sum = ", a + b)
+    print(4, 40, "prod = ", a * b)

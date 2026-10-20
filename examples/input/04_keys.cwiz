@@ -15,7 +15,7 @@ void main() {
         if (y < 1) y = 1; else if (y > 57) y = 57;
         clear();
         fillrect(x, y, 6, 6);
-        printLarge(2, 8, "last key: ", key());
+        print(2, 8, "last key: ", key());
         flip();
         delay(3);
     }

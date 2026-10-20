@@ -14,7 +14,7 @@ void main() {
     clear();
     text(0, 8, title);
     text(0, 16, "sum 0..10:");
-    printLarge(0, 24, total);
+    print(0, 24, total);
     text(0, 32, "values[7] =");
     num(80, 32, values[7]);
 }

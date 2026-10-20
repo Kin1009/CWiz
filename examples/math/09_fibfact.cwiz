@@ -9,11 +9,11 @@ int scale(int x, int k = 2) { return x * k; }
 void main() {
     clear();
 
-    printLarge(0, 8, "6! = ", factorial(6));
-    printLarge(0, 16, "fib(12) = ", fib(12));
-    printLarge(0, 24, "scale(7) = ", scale(7));
-    printLarge(0, 32, "scale(7, 10) = ", scale(7, 10));
-    printLarge(0, 40, "abs(-5) = ", abs(-5));
+    print(0, 8, "6! = ", factorial(6));
+    print(0, 16, "fib(12) = ", fib(12));
+    print(0, 24, "scale(7) = ", scale(7));
+    print(0, 32, "scale(7, 10) = ", scale(7, 10));
+    print(0, 40, "abs(-5) = ", abs(-5));
 
     for (int i = 0; i < 8; i = i + 1) {
         int d = 12 + i * 6;

@@ -37,7 +37,7 @@ void main() {
         rect(0, TOP, W, H - TOP);
         fillrect(px, py, S, S);
         rect(cx, cy, D, D);
-        printLarge(4, TOP + 3, "Score ", score);
+        print(4, TOP + 3, "Score ", score);
         flip();
         delay(4);
     }

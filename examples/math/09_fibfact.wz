@@ -20,10 +20,10 @@ def fib(x):
 
 def draw():
     clear()
-    printLarge(4, 8, "n = ", n)
-    printLarge(4, 16, "fib = ", fib(n))
-    printLarge(4, 24, "n! = ", fact(n))
-    printLarge(4, 32, "presses: ", presses)
+    print(4, 8, "n = ", n)
+    print(4, 16, "fib = ", fib(n))
+    print(4, 24, "n! = ", fact(n))
+    print(4, 32, "presses: ", presses)
 
 
 def main():

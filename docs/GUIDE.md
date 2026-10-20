@@ -34,7 +34,7 @@ $ build/wizrun examples/01_hello.wz --steps 1500000
                     ####   #    #
                     #      #    #
   ...
-ran examples/01_hello.wz  (880, stopped: max steps, 1500000 steps)
+ran examples/01_hello.wz  (stopped: max steps, 1500000 steps)
 ```
 
 `wizrun` executes the compiled program in the bundled simulator and draws the LCD as text
@@ -54,7 +54,7 @@ def main():
 ```
 
 - `clear()` blanks the screen.
-- `text(x, y, "…")` draws a string with the built-in 6×8 CW Mono font. `x`, `y` are pixels; `x` ranges
+- `text(x, y, "…")` draws a string with the built-in 6×8 font. `x`, `y` are pixels; `x` ranges
   0..191, `y` ranges 0..63 (`580` shows 0..62).
 - `wait_key()` comes from the standard library and blocks until a key is pressed.
 
@@ -275,31 +275,21 @@ num(x, y, -1234)        # draws a signed decimal, returns the end x
 char(x, y, 65)          # draws one character by ASCII code (out of range -> '?')
 ```
 
-There are **two print functions**, one for each CW font. Both take an `x`, a `y`, then any
-number of values, lay them out left to right, and return the end `x`:
-
-- **`print(x, y, …)`** uses **CW Mono**, the big fixed 8×8 font. Strings and numbers all use it,
-  with an 8 px advance.
-- **`print_text(x, y, …)`** uses **CW Text**, also in calculator-native 8×8 cells with an 8 px
-  advance. Every argument uses CW Text; numbers and characters CW Text lacks (digits, some
-  punctuation) use its built-in CW Mono fallback at the same 8×8 size.
-
-The two sets are independent: `print` never mixes in CW Text, and `print_text` never switches the
-whole line to CW Mono. `text()` and `num()` themselves still use the 6×8 CW Mono font with a fixed
-6 px advance.
+`print` is special sugar: it takes an `x`, a `y`, then any number of values, and lays them out
+left to right. A string literal (or a `rom8`/array name) prints as **text**; anything else prints
+as a **number**. It returns the end `x`.
 
 ```python
 score = 42
 def main():
-    print(4, 4, "Score ", score, " of ", 100)        # CW Mono
-    print_text(4, 20, "Score ", score, " of ", 100)  # CW Text
+    print(4, 4, "Score ", score, " of ", 100)   # -> "Score 42 of 100"
 ```
 
-Use the return value to continue drawing after the line:
+Because text is 6 pixels wide per character, you can use the return value to continue drawing:
 
 ```python
-x = print(4, 40, "n = ", n)
-print(x, 40, "!")
+x = print(4, 20, "n = ", n)
+print(x, 20, "!")
 ```
 
 ---
@@ -556,9 +546,8 @@ The deliberate differences from Wiz:
   (`a[i]`, never `a[i][j]`) — but a pointer *is* indexable, see [§20.2](#202-pointers-and-memory).
 - `char`, `rom`, `rom8`, `void`, … are keywords, so you cannot use them as identifiers.
 
-`print(x, y, …)` and `print_text(x, y, …)` work exactly as in
-[§11](#11-text-numbers-and-print): the first uses the **CW Mono** set, the second the
-**CW Text** set; missing CW Text glyphs use that set's CW Mono fallback.
+`print(x, y, …)` works exactly as in [§11](#11-text-numbers-and-print); a string literal or a
+`rom8` name prints as text, everything else as a number.
 
 ### 20.1 Preprocessor directives
 
@@ -598,15 +587,13 @@ rom8 char debug_tag[4] = "dbg";
 - `#for 580` / `#for 880` is the **target directive** — the directive spelling of the
   `for <targets>` section header ([§17](#17-one-file-several-machines)) — and `#cwapp` marks the
   section that follows as the **app**: a patch for the fx-580VN X firmware rather than a ROM file
-  (write it after `#for 580`; `#cwapp` without a preceding `#for 580` produces `#cwapp requires #for 580 before it`). `#slot n` (after `#cwapp`, `n` = `1..12`) chooses which
-  fx-580VN X menu slot the compiler patches; it defaults to 2. A `----` line ends the section and
-  returns to code that every target gets:
+  (write it after `#for 580`). A `----` line ends the section and returns to code that every
+  target gets:
 
   ```c
   #for 580
   void leave() { }              // 580: a plain ROM, nothing to leave
   #cwapp
-  #slot 3                       // replace menu slot 3 (1..12, default 2)
   void leave() { exit(); }      // the app: back to the fx-580VN X menu
   ----
   void main() { ... leave(); }   // built for 580 and for the app
@@ -616,8 +603,6 @@ rom8 char debug_tag[4] = "dbg";
 drivers report that file and line, and `wiz::cwiz_line_origin()` in [API.md](API.md) exposes the
 same map.
 See [examples/cwiz/07_preproc.cwiz](../examples/cwiz/07_preproc.cwiz).
-
-*Note: `char`/`glyph`, `text` and `num` use the embedded 6×8 CW Mono glyph set (`font6x8.hpp`). `print` additionally uses embedded 8-pixel CW Text and CW Mono tables (`font8x8.hpp`); no system font file is needed at compile time or on the calculator.*
 
 ### 20.2 Pointers and memory
 
