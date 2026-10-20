@@ -124,11 +124,11 @@ void wt::run_lint() {
         check("lint: unused Wiz variable", has(d, "readability/unused-variable"));
     }
 
-    // The compiled-program font must be the CW font set.  These bytes come from
-    // cw-mono.ttf at 7 px (glyph '0'); a regression to the old VGA table changes
-    // them, so this check documents the intent.
+    // The compiled-program font is the original Wiz 6x8 ASCII font
+    // (font6x8.py, libcw.c YsFont6x8).  These are the glyph '0' bytes; a
+    // regression to any other table changes them, so this documents the intent.
     {
-        const unsigned char zero[8] = {0xE0, 0xB0, 0xB0, 0xB0, 0xB0, 0xB0, 0xE0, 0x00};
+        const unsigned char zero[8] = {0x70, 0x88, 0x98, 0xA8, 0xC8, 0x88, 0x70, 0x00};
         check("lint/font: compiled programs use the CW glyphs",
               std::memcmp(FONT6X8 + (0x30 - 32) * 8, zero, 8) == 0);
     }
