@@ -6,6 +6,8 @@
 #launcher common
 
 int main() {
+    setlr();
+    setsfr();
     screen_del();
     line(0, 0, 191, 62);
     print(0x30, 0x01, "ROP LINE");

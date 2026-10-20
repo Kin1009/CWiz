@@ -12,6 +12,7 @@
 #include "cpre.hpp"
 #include "diag.hpp"
 #include "patch.hpp"
+#include "rop.hpp"
 #include "version.hpp"
 #include "wiz.hpp"
 
@@ -22,6 +23,8 @@ static const char* DOC =
     "\n"
     "Compiles Wiz (.wz) and CWiz (.cwiz) source for Casio ClassWiz calculators and\n"
     "writes a ROM image (.bin) plus an assembly listing (.asm).\n"
+    "A #rop source instead writes the exact RAC/hdcompiler payload to .bin\n"
+    "and its launcher to .launcher.bin.\n"
     "\n"
     "A source with a #cwapp section is compiled for the fx-580VN X firmware and\n"
     "patched into the built-in 580 ROM automatically; #slot n chooses the menu slot\n"
@@ -108,6 +111,10 @@ static bool print_preprocessed(const std::string& src, const Cli& args, Diag& d)
     bool ok = false;
     std::string text = read_text_file(src, &ok);
     if (!ok) d.fatal("cannot read file: " + src);
+    if (source_is_rop(text)) {
+        std::fputs(text.c_str(), stdout);
+        return true;
+    }
     try {
         if (language_of(src, args.value("lang")) == "cwiz")
             std::fputs(select_sections(preprocess_cwiz(text, src, tg.name), tg).c_str(), stdout);
@@ -127,10 +134,67 @@ static bool print_preprocessed(const std::string& src, const Cli& args, Diag& d)
     return true;
 }
 
+static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
+                            const std::string& text) {
+    std::string target = resolve_target(args, d, src);
+    const std::string model = target == "880" || target == "cwii" ? "880" : "580";
+    RopResult rop;
+    try {
+        // build_rop is the native C++ implementation of the RAC/hdcompiler
+        // method: the payload and launcher are separate output blocks.
+        rop = build_rop(text, model);
+    } catch (const std::exception& e) {
+        d.error(e.what(), src);
+        return false;
+    }
+    if (!rop.ok) {
+        d.error(rop.error.empty() ? "ROP compilation failed" : rop.error, src);
+        return false;
+    }
+
+    std::string bin_path, asm_path;
+    output_paths(src, args.value("output"), bin_path, asm_path);
+    const std::string launcher_path = splitext_root(bin_path) + ".launcher.bin";
+    std::string listing = fmt("; ROP payload @ %04X (%zu bytes)\n; launcher @ %04X (%zu bytes)\n",
+                               rop.base, rop.bytes.size(), rop.launcher_base, rop.launcher.size());
+    listing += "; launcher: " + rop.launcher_hex + "\n" + rop.log;
+    try {
+        if (!args.has("no-asm") && !write_text_file(asm_path, listing))
+            d.fatal("cannot write output: " + asm_path);
+        if (!args.has("asm_only") && !write_binary_file(bin_path, rop.bytes))
+            d.fatal("cannot write output: " + bin_path);
+        if (!args.has("asm_only") && !write_binary_file(launcher_path, rop.launcher))
+            d.fatal("cannot write output: " + launcher_path);
+    } catch (const std::exception& e) {
+        d.fatal(fmt("cannot write output: %s", e.what()));
+    }
+
+    const bool tty = stdout_is_tty();
+    const char* label = args.has("asm_only") ? "AS" : "CC";
+    const std::string out_desc = args.has("asm_only") ? asm_path : bin_path;
+    std::fputs(fmt("%s %s -> %s\n", paint(label, style::OK, tty).c_str(), bold(src, tty).c_str(),
+                   out_desc.c_str())
+                   .c_str(),
+               stdout);
+    std::fputs(fmt("    [ROP %s] payload %zu bytes @ %04X; launcher %zu bytes @ %04X\n",
+                   model.c_str(), rop.bytes.size(), rop.base, rop.launcher.size(), rop.launcher_base)
+                   .c_str(),
+               stdout);
+    if (!args.has("asm_only"))
+        std::fputs(fmt("    launcher -> %s\n", launcher_path.c_str()).c_str(), stdout);
+    return true;
+}
+
 static bool compile_one(const std::string& src, const Cli& args, Diag& d) {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (!fs::is_regular_file(src, ec)) d.fatal(fmt("%s: no such file", src.c_str()));
+
+    bool source_ok = false;
+    const std::string source_text = read_text_file(src, &source_ok);
+    if (!source_ok) d.fatal("cannot read file: " + src);
+    if (source_is_rop(source_text))
+        return compile_rop_one(src, args, d, source_text);
 
     std::string target = resolve_target(args, d, src);
 

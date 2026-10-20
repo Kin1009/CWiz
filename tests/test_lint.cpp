@@ -112,6 +112,18 @@ void wt::run_lint() {
         check("lint: duplicate #slot", has(d, "preproc/duplicate-slot"));
     }
 
+    // ROP directives are handled by the ROP backend, not the ordinary CWiz
+    // preprocessor.  In particular, #org and #launcher must not be reported as
+    // unknown directives by the linter.
+    {
+        const std::string rop =
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { screen_del(); print(0x30, 0x01, \"LINT ROP\"); render(); }\n";
+        auto d = lint(rop, "t.cwiz", "cw");
+        check("lint: ROP directives compile", !has(d, "compile"),
+              d.empty() ? "" : d[0].rule + ": " + d[0].message);
+    }
+
     // Compiler errors are part of the linter output.
     {
         auto d = lint("int main() { return does_not_exist; }\n");

@@ -16,6 +16,11 @@ int main() {
 }
 ```
 
+The ROP backend supplies the exact hdcompiler/RAC startup when the source does
+not already contain it: `setlr` followed by `setsfr`. `setsfr` initializes the
+calculator's SFR/display state. A chain that omits this preamble can inject
+successfully and then hang when it reaches display code.
+
 ## How it runs
 
 ROP needs two pieces of memory:
@@ -30,23 +35,27 @@ ROP needs two pieces of memory:
 ### 580 common launcher
 
 ```
-FD 24 30 30                     trigger + pad
-DA 7B 31 30                     pop qr0
-FE 03                           program size (01 short, 02 medium, 03 long)
-E0 E9                           backup address (where the payload was injected)
-30 D7                           execution address (usually D730)
+FD 24 30 30                     trigger + input-area prefix
+D0 08 33 30                     launcher setlr_pc
+34 7B 31 30                     pop xr0
+30 D7 E0 E9                     destination D730, source E9E0
+51 94 30 30                     BL memcpy
+FE 02                           RAC medium copy-size code
+42 07 31 30                     pop er14
 2E D7                           execution address - 2
-32 89 31 30                     BL memcpy (copies backup -> execution)
-30 30                           pad
-74 1F 32 30                     sp = er6, pop er8
+60 0D 32 30                     sp = er14, pop er14
 ```
 
 The launcher copies the payload from `E9E0` to `D730` and continues there. The
-compiler therefore resolves payload-internal labels and string pointers against
-the execution address (`D730`), while still reporting/writing the injected
-payload at `#org` (`E9E0` by default). Gadget words also follow hdcompiler's
-format: the `30 30` input-area prefix is used only when the chain itself starts
-in the input area; copied main payloads retain the gadget's native bank bytes.
+compiler resolves code control flow against `D730`, but data pointers in the
+payload remain at the backup address (`E9E0`). Every gadget call keeps RAC's
+`30 30` call-class tag, even after the payload is copied. This distinction is essential:
+the copied code runs at `D730`, while its string pool is still physically at
+`E9E0` unless the chain copies the data separately.
+
+The launcher bytes above are the RAC/hdcompiler pattern used by the working
+`basic_draw` examples. The older `pop qr0`/`0x8932` launcher is a different
+variant and must not be substituted byte-for-byte.
 
 ### 880 common launcher
 
@@ -73,7 +82,7 @@ After the stub, SP points exactly at the payload.
 ### Options
 
 ```
-#launcher common                 // defaults: long, #org, D730 (580)
+#launcher common                 // defaults: RAC medium launcher, #org, D730 (580)
 #launcher common short           // 01 short, 02 medium, 03 long
 #launcher common long E9E0 D730  // length, backup, execution address
 #launcher simple                 // 10-byte stub
@@ -81,7 +90,8 @@ After the stub, SP points exactly at the payload.
 ```
 
 "Build" writes `wiz/<name>.bin` (payload) and prints the launcher as hex in the
-log. "Build & Run" also injects both blocks into the running model. Use
+log. The standalone `wizc` driver writes the launcher separately as
+`<name>.launcher.bin`. "Build & Run" also injects both blocks into the running model. Use
 **Copy launcher** in the toolbar to put the launcher hex on the clipboard.
 
 ## Syntax
@@ -107,4 +117,7 @@ Any name present in the gadget/label table can be called directly, and
 `asm { "pop xr0" }` emits a raw gadget call.
 
 The gadget tables are embedded in the binary (`compiler/src/rop_data.hpp`),
-derived from the CasioC `hdcompiler` lists.
+derived from the CasioC `hdcompiler` lists. To validate a change, compile an
+equivalent low-level RAC source and compare the complete payload byte-for-byte;
+the first differing word usually identifies a missing LR/SFR setup, a wrong
+gadget endpoint, a backup/runtime relocation error, or a missing string NUL.
