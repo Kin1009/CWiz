@@ -1,0 +1,15 @@
+// ROP payload using the common launcher ("launcher chung").
+//
+// Inject the payload at E9E0.  The launcher copies it to D730 and runs it
+// there, which is how most existing 580 ROP programs are entered.
+#rop
+#for 580
+#org E9E0
+#launcher common
+
+int main() {
+    screen_del();
+    print(0x30, 0x01, "COMMON");
+    print(0x30, 0x11, "LAUNCHER");
+    render();
+}

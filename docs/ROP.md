@@ -6,8 +6,8 @@ gadget chain instead of a ROM image, and the emulator injects it into RAM.
 ```c
 #rop
 #for 580
-#org E9E0        // payload address (default E9E0)
-#launcher 8154   // launcher address (default 8154, the overflow entry)
+#org E9E0        // payload address (default E9E0 on 580, E330 on 880)
+#launcher common // "launcher chung" (the default)
 
 int main() {
     screen_del();
@@ -20,21 +20,62 @@ int main() {
 
 ROP needs two pieces of memory:
 
-1. **Payload** at `#org` — the gadget chain itself.
-2. **Launcher** at `#launcher` — a 10-byte stub that moves SP to the payload
-   and continues the chain there:
+1. **Payload** at `#org` — the gadget chain itself. Inject it at `E9E0` on the
+   580 and at `E330` on the 880.
+2. **Launcher** — a short chain that makes the calculator start executing the
+   payload. The default is the *launcher chung* (common launcher), the one used
+   by most existing 580 programs.
 
-   ```
-   78 5C 31 30   pop er14
-   <payload-2>   little-endian
-   60 0D 32 30   sp = er14, pop er14
-   ```
+### 580 common launcher
 
-   After the stub, SP points exactly at the payload, so the gadget chain runs
-   from `#org`.
+```
+FD 24 30 30                     trigger + pad
+DA 7B 31 30                     pop qr0
+FE 03                           program size (01 short, 02 medium, 03 long)
+E0 E9                           backup address (where the payload was injected)
+30 D7                           execution address (usually D730)
+2E D7                           execution address - 2
+32 89 31 30                     BL memcpy (copies backup -> execution)
+30 30                           pad
+74 1F 32 30                     sp = er6, pop er8
+```
 
-"Build & Run" writes both blocks and sets PC to the launcher. Build only writes
-`wiz/<name>.bin` (payload) and prints the launcher address in the log.
+The launcher copies the payload from `E9E0` to `D730` and continues there.
+
+### 880 common launcher
+
+```
+FD 26                           trigger
+2E E3                           payload address - 2 (E330 - 2)
+C0 75 32 30                     sp gadget
+```
+
+### Simple launcher
+
+`#launcher simple` (or `#launcher <address>`, for compatibility) emits the
+10-byte stub instead:
+
+```
+78 5C 31 30   pop er14
+<payload-2>   little-endian
+60 0D 32 30   sp = er14, pop er14
+```
+
+After the stub, SP points exactly at the payload.
+
+### Options
+
+```
+#launcher common                 // defaults: long, #org, D730 (580)
+#launcher common short           // 01 short, 02 medium, 03 long
+#launcher common long E9E0 D730  // length, backup, execution address
+#launcher simple                 // 10-byte stub
+#launcher 8154                   // stub placed at an explicit address
+```
+
+"Build" writes `wiz/<name>.bin` (payload) and prints the launcher as hex in the
+log. "Build & Run" also injects both blocks into the running model. Use
+**Copy launcher** in the toolbar to put the launcher hex on the clipboard.
 
 ## Syntax
 
