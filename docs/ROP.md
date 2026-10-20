@@ -21,7 +21,8 @@ int main() {
 ROP needs two pieces of memory:
 
 1. **Payload** at `#org` — the gadget chain itself. Inject it at `E9E0` on the
-   580 and at `E330` on the 880.
+   580 and at `E330` on the 880. `#org` and `#launcher` only apply to a `#rop`
+   source; normal Wiz/CWiz programs ignore them.
 2. **Launcher** — a short chain that makes the calculator start executing the
    payload. The default is the *launcher chung* (common launcher), the one used
    by most existing 580 programs.
@@ -53,7 +54,8 @@ C0 75 32 30                     sp gadget
 ### Simple launcher
 
 `#launcher simple` (or `#launcher <address>`, for compatibility) emits the
-10-byte stub instead:
+10-byte stub instead. Without an explicit address the launcher goes to the
+program input area (`D180` on the 580, `9268` on the 880):
 
 ```
 78 5C 31 30   pop er14
@@ -70,7 +72,7 @@ After the stub, SP points exactly at the payload.
 #launcher common short           // 01 short, 02 medium, 03 long
 #launcher common long E9E0 D730  // length, backup, execution address
 #launcher simple                 // 10-byte stub
-#launcher 8154                   // stub placed at an explicit address
+#launcher 8154                   // stub placed at an explicit address (must be RAM)
 ```
 
 "Build" writes `wiz/<name>.bin` (payload) and prints the launcher as hex in the

@@ -3,7 +3,7 @@
 #rop
 #for 580
 #org E9E0
-#launcher 8154
+#launcher common
 
 int main() {
     screen_del();
