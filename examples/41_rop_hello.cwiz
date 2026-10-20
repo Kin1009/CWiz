@@ -1,0 +1,18 @@
+// ROP payload in CWiz syntax.
+//
+// #rop switches this file to the gadget-chain backend: the program is compiled
+// to a ROP payload instead of a ROM image, and "Build & Run" injects it into
+// the emulator's RAM at #org.
+//
+// print(x, y, "text") uses the calculator's line-print ABI:
+//   x = font/column byte (0x30 is the normal small font)
+//   y = line position (0x01 = line 1, 0x11 = line 2, ...)
+#rop
+#for 580
+#org E9E0
+
+int main() {
+    screen_del();
+    print(0x30, 0x01, "HELLO ROP");
+    render();
+}

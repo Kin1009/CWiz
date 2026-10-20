@@ -1,0 +1,12 @@
+// ROP payload: draw a diagonal line and print a label.
+// Same CWiz syntax as every other .cwiz file, plus the #rop directive.
+#rop
+#for 580
+#org E9E0
+
+int main() {
+    screen_del();
+    line(0, 0, 191, 62);
+    print(0x30, 0x01, "ROP LINE");
+    render();
+}

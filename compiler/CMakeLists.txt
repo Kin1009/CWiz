@@ -41,6 +41,7 @@ add_library(wizcore STATIC
   src/build.cpp
   src/builtin_rom.cpp
   src/patch.cpp
+  src/rop.cpp
   src/lint.cpp
 )
 target_include_directories(wizcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
