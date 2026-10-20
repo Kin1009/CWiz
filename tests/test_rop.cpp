@@ -42,6 +42,10 @@ void wt::run_rop() {
     check("rop: 580 common build succeeds", r580.ok && !r580.bytes.empty());
     check("rop: 580 payload stays at injection address", r580.base == 0xE9E0);
     check("rop: 580 common launcher uses input area", r580.launcher_base == 0xD180);
+    check("rop: 580 main payload uses raw RAC gadget words",
+          r580.bytes.size() >= 4 && (r580.bytes[2] != 0x30 || r580.bytes[3] != 0x30),
+          r580.bytes.size() >= 4 ? wiz::fmt("%02X %02X %02X %02X", r580.bytes[0], r580.bytes[1],
+                                            r580.bytes[2], r580.bytes[3]) : "short");
     check("rop: 580 pointers target copied payload", p580 < r580.bytes.size() &&
                                                        has16(r580.bytes, 0xD730 + p580));
     check("rop: 580 pointers do not target stale injection address",
@@ -52,6 +56,10 @@ void wt::run_rop() {
     check("rop: 880 common build succeeds", r880.ok && !r880.bytes.empty());
     check("rop: 880 payload stays at execution address", r880.base == 0xE330);
     check("rop: 880 common launcher uses input area", r880.launcher_base == 0x9268);
+    check("rop: 880 main payload uses raw RAC gadget words",
+          r880.bytes.size() >= 4 && (r880.bytes[2] != 0x30 || r880.bytes[3] != 0x30),
+          r880.bytes.size() >= 4 ? wiz::fmt("%02X %02X %02X %02X", r880.bytes[0], r880.bytes[1],
+                                            r880.bytes[2], r880.bytes[3]) : "short");
     check("rop: 880 pointers target in-place payload", p880 < r880.bytes.size() &&
                                                        has16(r880.bytes, 0xE330 + p880));
 

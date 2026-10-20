@@ -44,7 +44,9 @@ E0 E9                           backup address (where the payload was injected)
 The launcher copies the payload from `E9E0` to `D730` and continues there. The
 compiler therefore resolves payload-internal labels and string pointers against
 the execution address (`D730`), while still reporting/writing the injected
-payload at `#org` (`E9E0` by default).
+payload at `#org` (`E9E0` by default). Gadget words also follow hdcompiler's
+format: the `30 30` input-area prefix is used only when the chain itself starts
+in the input area; copied main payloads retain the gadget's native bank bytes.
 
 ### 880 common launcher
 
