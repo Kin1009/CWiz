@@ -78,19 +78,12 @@ def main():
         sys.exit('error: set_mode at %05X is %s, expected %s (different firmware?)' % (HOOK, bytes(rom[HOOK:HOOK + 4]).hex(' '), HOOK_OLD.hex(' ')))
     if not 1 <= a.slot <= NS:
         sys.exit('error: --slot must be 1..%d' % NS)
-
-    # Warn about slots whose mode id jumps into seg-3 stubs (0xFF) in this ROM
-    BROKEN_MODES = {0x06, 0x07, 0x0C, 0x88}   # Matrix, Vector, Distribution, Table
-    broken = [CH[k] for k in range(NS) if rom[MB + 6*k + 2] in BROKEN_MODES]
-    if broken:
-        print('warning: menu slots %s use firmware modes that jump to unimplemented seg-3 stubs in this ROM' % ','.join(broken))
-        print('         selecting those slots on the real calculator will crash; this is a ROM issue, not patch_menu.')
     mode = int(a.mode, 16)
     if not 0x80 <= mode <= 0xFF or mode in (0xC1, 0xC4, 0x88, 0x89):
         sys.exit('error: --mode must be 80..FF and not one the firmware already uses')
 
     try:
-        img, full, variables, syms = build_source(open(a.app, encoding='utf8').read(), 'cwapp')
+        img, full, variables, syms = build_source(open(a.app, encoding='utf8').read(), 'cwapp', a.app)
     except (WizError, AsmError) as e:
         sys.exit('error: %s' % e)
     code = bytes(img[BASE:])
