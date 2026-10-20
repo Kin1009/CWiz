@@ -1,20 +1,7 @@
-"""build.py - one command: Wiz source -> ROM .bin (+ .asm listing), for one or both calculators.
+"""build.py - one command: Wiz source -> ROM .bin (+ .asm listing).
 
 usage: python3 build.py prog.wz [out.bin] [--target cwii|cw|all]
 
-A source file can hold code for several machines:
-
-    for cwii            # ML620909 (ClassWiz II)
-    <code only for cwii>
-    ---------------
-    for cw              # ML620906 (ClassWiz)
-    <code only for cw>
-    ---------------
-    <code after a separator line is common again>
-
-Without sections the file is common code. Default target: every target the file declares
-(cwii if it declares none). Output names: prog.bin for an undeclared cwii build (as before),
-otherwise prog.<target>.bin.
 """
 import argparse
 import os
@@ -26,6 +13,7 @@ sys.path.insert(0, HERE)
 from u8asm import Assembler, to_bin, AsmError
 from wizc import compile_to_asm, WizError
 from targets import TARGETS, DEFAULT_TARGET, get_target, declared_targets, select_sections, SectionError
+import wizimport
 
 
 def make_boot(target):
@@ -44,26 +32,24 @@ def make_boot(target):
 def runtime_for(target):
     """runtime.asm with the lines tagged for the other LCD type removed."""
     drop = ';@1p' if target.planes == 2 else ';@2p'
-    out = ['_ROWS EQU %d' % target.rows]      # visible LCD rows: pixel() ignores y >= _ROWS
+    out = []
     for line in open(os.path.join(HERE, 'runtime.asm')).read().split('\n'):
         if line.rstrip().endswith(drop):
             continue
         if line.rstrip().endswith(';@seg') and not target.rom_seg:
             continue
-        if line.rstrip().endswith(';@off'):          # VRAM row offset (cw: user y=0 is VRAM row 1)
-            if not target.row_off:
-                continue
-            line = line.replace('#32 ;@off', '#%d ;@off' % (32 * target.row_off))
         out.append(line)
     return '\n'.join(out)
 
 
-def build_source(src, target=None):
+def build_source(src, target=None, path=None):
+    """path = the file the source came from, so `import` can find files next to it"""
     tg = get_target(target or DEFAULT_TARGET)
     try:
         src = select_sections(src, tg)
     except SectionError as e:
         raise WizError(str(e))
+    src = wizimport.expand_imports(src, tg, path, WizError)
     body, variables = compile_to_asm(src, tg)
     full = make_boot(tg) + body + runtime_for(tg)
     asm = Assembler(tg.core)
@@ -99,14 +85,16 @@ def main():
         tg = TARGETS[name]
         out = a.out if (a.out and len(targets) == 1) else (base + '.bin' if legacy_name else '%s.%s.bin' % (base, name))
         try:
-            rom, full, variables, syms = build_source(text, tg)
+            rom, full, variables, syms = build_source(text, tg, a.prog)
         except (WizError, AsmError) as e:
-            print('error [%s]:' % name, e)
             m = re.search(r'line (\d+)', str(e))
-            lines = text.split('\n')
-            if m and 1 <= int(m.group(1)) <= len(lines):
-                n = int(m.group(1))
-                print('  %4d | %s' % (n, lines[n - 1]))
+            where = wizimport.describe_line(int(m.group(1))) if m else None
+            msg = str(e)
+            if where and not msg.startswith(where[0]):
+                msg = re.sub(r'line \d+', '%s line %d' % (where[0], where[1]), msg, 1)
+            print('error [%s]:' % name, msg)
+            if where and not str(e).startswith(where[0]):
+                print('  %4d | %s' % (where[1], where[2]))
             failed = True
             continue
         from wizc import LAST_NOTES
