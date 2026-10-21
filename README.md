@@ -82,6 +82,7 @@ See [docs/RUNNING.md](docs/RUNNING.md) for the full workflow, including the emul
 | [docs/GUIDE.md](docs/GUIDE.md) | Learn Wiz (and meet CWiz): syntax, scoping, screen, input, arrays, targets, recursion. Task-oriented. |
 | [docs/API.md](docs/API.md) | Reference: built-ins, standard library, `print`, key constants, memory map, targets, the C++ APIs, the runtime ABI. |
 | [docs/RUNNING.md](docs/RUNNING.md) | Building, simulating, running under the emulator, testing, patching into a firmware, troubleshooting. |
+| [docs/ROP.md](docs/ROP.md) | ROP payloads: the chain encoding, the nX-U16 register layout, the gadget ABIs and the launchers. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Internals: compiler pipeline, calling convention, runtime, ISA/assembler, boot templates. |
 | [examples/README.md](examples/README.md) | Annotated tour of every example program, Wiz and CWiz. |
 
@@ -119,6 +120,36 @@ A single source file can carry code for more than one machine using `<target>` s
 (both spellings are accepted by `--target` and by `for …` section headers). Chip names such as
 `ML620909` are **not** accepted. The default target is `880`, unless the `WIZ_TARGET` environment
 variable overrides it (with an internal name, e.g. `WIZ_TARGET=cw`).
+
+## ROP payloads
+
+A program that starts with `#rop` is not compiled into a ROM image: it is translated into an
+**nX-U16 ROP gadget chain** — a sequence of `call` / `pop` / `flow` words that the calculator
+executes straight from RAM.
+
+```c
+#rop
+#for 580
+#org E9E0          // payload address (E9E0 on the 580, E330 on the 880)
+#launcher common   // the community "launcher chung"
+
+int main() {
+    setlr();
+    setsfr();
+    screen_del();
+    print(0x30, 0x01, "HELLO ROP");
+    render();
+}
+```
+
+The compiler emits the chain, the launcher that starts it, and a low-level listing that shows
+every gadget word, its class and its inline data. The payload is injected at `#org`; the launcher
+goes into the calculator's program input area (`D180` on the 580, `9268` on the 880) and is
+started with **LEFT** then **EXE** in Program mode.
+
+The exact ABI — chain word encoding, register file, `printline` / `smallprint` / `line_draw` /
+`render_bitmap` conventions and the launcher bytes — is documented in
+[docs/ROP.md](docs/ROP.md), with the community reference material in `docs/rop-notes/`.
 
 ## Project layout
 
@@ -163,6 +194,12 @@ This is a hobby/experimental toolchain. In particular:
   real firmware**; try it in an emulator first.
 - Emitting a `.bin` is fully tested in the simulator; flashing it to a device is chip- and
   board-specific and out of scope here (see [docs/RUNNING.md](docs/RUNNING.md)).
+
+## Contact
+
+- 🐛 **Issues**: [github.com/Kin1009/CWiz/issues](https://github.com/Kin1009/CWiz/issues)
+- 📧 **Email**: [khoi.nguyenminh100912@gmail.com](mailto:khoi.nguyenminh100912@gmail.com)
+- 🖥️ **Emulator with this toolchain built in**: [github.com/Kin1009/CasioEmuMsvc-Mac](https://github.com/Kin1009/CasioEmuMsvc-Mac)
 
 ## License / provenance
 
