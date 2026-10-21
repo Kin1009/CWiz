@@ -10,16 +10,19 @@ gadget chain instead of a ROM image, and the emulator injects it into RAM.
 #launcher common // "launcher chung" (the default)
 
 int main() {
+    setlr();
+    setsfr();
     screen_del();
-    print(0x30, 0x01, "HELLO ROP");   // x, line, text
+    print(0x30, 0x01, "HELLO ROP");   // pad, line, text
     render();
 }
 ```
 
-The ROP backend supplies the exact hdcompiler/RAC startup when the source does
-not already contain it: `setlr` followed by `setsfr`. `setsfr` initializes the
-calculator's SFR/display state. A chain that omits this preamble can inject
-successfully and then hang when it reaches display code.
+Every ROP program starts with `setlr` (establish LR) and `setsfr` (initialize
+the calculator's SFR/display state) — a chain that omits this preamble can
+inject successfully and then hang when it reaches display code. `screen_del()`
+clears the frame buffer and `render()` is mandatory after drawing: without it
+nothing appears on the screen.
 
 ## How it runs
 
@@ -32,30 +35,88 @@ ROP needs two pieces of memory:
    payload. The default is the *launcher chung* (common launcher), the one used
    by most existing 580 programs.
 
-### 580 common launcher
+The launcher is typed into the calculator's program input area (`D180` on the
+580, `9268` on the 880) and started with **LEFT** then **EXE**.
+
+## Chain encoding
+
+Every gadget is four bytes:
+
+```
+[ addr_lo, addr_hi, class_lo, class_hi ]
+```
+
+| class | meaning | example |
+|---|---|---|
+| `30 30` | call | `50 94 30 30` = call `0x09450` (`BL memcpy`) |
+| `31 30` | pop | `34 7B 31 30` = pop `0x17B34` (`pop xr0`) |
+| `32 30` | flow / stack | `60 0D 32 30` = `sp = er14, pop er14` |
+| `33 30` | setlr_pc | `D0 08 33 30` = `setlr_pc` |
+
+The class bytes are **explicit** — they are never derived from the gadget
+address. A gadget at `0x23DC8` must still be emitted as `C8 3D 30 30`; adding
+the address to a `0x3030xxxx` constant corrupts the class byte for every
+address at or above `0x10000` and silently turns calls into pops.
+
+### Registers (nX-U16)
+
+```
+QR0 (8 bytes)
+├── XR0 (4 bytes)
+│   ├── ER0 (2 bytes)  -> R1 (high), R0 (low)
+│   └── ER2 (2 bytes)  -> R3 (high), R2 (low)
+└── XR4 (4 bytes) ...
+```
+
+`Rn` is one byte, `ERn` is two bytes (`R(n)` low, `R(n+1)` high) and `XRn` is
+four bytes (`ERn` + `ER(n+2)`). So `pop xr0` consumes **four** bytes: bytes 0-1
+land in `ER0`, bytes 2-3 land in `ER2`. `pop er0` / `pop er2` consume two bytes
+each.
+
+### Gadget ABIs used by the builtins
+
+| builtin | gadget | registers |
+|---|---|---|
+| `print(pad, line, "text")` | `printline` `0x23DC8` | `ER0 = (pad << 8) \| line`, `ER2 = string` |
+| `print_small(font, line, "text")` | `smallprint` `0x23DCC` | `ER0 = (line << 8) \| font`, `ER2 = string` |
+| `line(x1,y1,x2,y2)` | `line_draw` `0x08E62` | `XR0 = x1, y1, x2, y2` |
+| `bitmap(x,y,w,h,data)` | `render_bitmap` `0x09848` | `XR0 = x, y, w, h`, then `ER0 = data` |
+| `screen_del()` | `buffer_clear` `0x08C60` | — |
+| `render()` | `render.ddd4` `0x0947E` | — |
+| `setlr()` | `setlr` `0x09FA8` | — |
+| `setsfr()` | `setsfr` `0x0A0E0` | — |
+
+`pad` is normally `0x30`; `line` is the row byte (`0x01`, `0x11`, `0x21`, `0x31`
+for lines 1..4); `font` is `0x08` (small), `0x0A` (medium) or `0x0E` (large).
+Only the large font can render Vietnamese text. `print` uses the large font and
+is limited to 17 characters per line.
+
+## 580 common launcher
+
+The 26 byte *launcher chung* is byte-identical to the one used by the existing
+community programs:
 
 ```
 FD 24 30 30                     trigger + input-area prefix
-D0 08 33 30                     launcher setlr_pc
-34 7B 31 30                     pop xr0
-30 D7 E0 E9                     destination D730, source E9E0
-51 94 30 30                     BL memcpy
-FE 02                           RAC medium copy-size code
-42 07 31 30                     pop er14
+DA 7B 31 30                     copy-with-length gadget
+FE 03                           copy length 0x03FE (1022 bytes)
+E0 E9                           source E9E0 (backup area)
+30 D7                           destination D730 (execution area)
 2E D7                           execution address - 2
-60 0D 32 30                     sp = er14, pop er14
+32 89 31 30                     pop 0x8932
+30 30                           class word
+74 1F 32 30                     sp = er6, pop er8, pop pc
 ```
 
-The launcher copies the payload from `E9E0` to `D730` and continues there. The
-compiler resolves code control flow against `D730`, but data pointers in the
-payload remain at the backup address (`E9E0`). Every gadget call keeps RAC's
-`30 30` call-class tag, even after the payload is copied. This distinction is essential:
-the copied code runs at `D730`, while its string pool is still physically at
-`E9E0` unless the chain copies the data separately.
+The copy length is selected by the RAC length code: `01` = `0x01FE` (510
+bytes), `02` = `0x02FE` (766 bytes, default), `03` = `0x03FE` (1022 bytes). The
+payload must fit in the selected length.
 
-The launcher bytes above are the RAC/hdcompiler pattern used by the working
-`basic_draw` examples. The older `pop qr0`/`0x8932` launcher is a different
-variant and must not be substituted byte-for-byte.
+The launcher copies the payload from the backup area (`E9E0`) to the execution
+area (`D730`) and continues there, so **absolute addresses inside the payload
+are resolved against `D730`**, while the bytes themselves are injected at
+`E9E0`. The `pop xr0` / `BL memcpy` launcher is a different variant and must
+not be substituted byte-for-byte.
 
 ### 880 common launcher
 
@@ -91,8 +152,9 @@ After the stub, SP points exactly at the payload.
 
 "Build" writes `wiz/<name>.bin` (payload) and prints the launcher as hex in the
 log. The standalone `wizc` driver writes the launcher separately as
-`<name>.launcher.bin`. "Build & Run" also injects both blocks into the running model. Use
-**Copy launcher** in the toolbar to put the launcher hex on the clipboard.
+`<name>.launcher.bin`. "Build & Run" also injects both blocks into the running
+model. Use **Copy launcher** in the toolbar to put the launcher hex on the
+clipboard.
 
 ## Syntax
 
@@ -107,7 +169,9 @@ Builtins are mapped to the gadget database (580 and 880):
 | `screen_del()` / `cls()` | `buffer_clear`, `memzero` |
 | `line(x1,y1,x2,y2)` | `line_draw` |
 | `pixel(x,y)` | `pixel_draw` |
-| `print(x, line, "text")` | `pop xr0`, `line_print` |
+| `print(pad, line, "text")` | `pop xr0`, `printline` |
+| `print_small(font, line, "text")` | `pop xr0`, `smallprint` |
+| `bitmap(x,y,w,h,data)` | `pop xr0`, `render_bitmap` |
 | `render()` / `flip()` | `render`, `render.ddd4` |
 | `delay(n)` | `delay` |
 | `key()` | `getkey`, `getscancode` |
@@ -119,5 +183,14 @@ Any name present in the gadget/label table can be called directly, and
 The gadget tables are embedded in the binary (`compiler/src/rop_data.hpp`),
 derived from the CasioC `hdcompiler` lists. To validate a change, compile an
 equivalent low-level RAC source and compare the complete payload byte-for-byte;
-the first differing word usually identifies a missing LR/SFR setup, a wrong
-gadget endpoint, a backup/runtime relocation error, or a missing string NUL.
+the first differing word usually identifies a wrong class byte, a missing
+LR/SFR setup, a wrong gadget endpoint, a backup/runtime relocation error, or a
+missing string NUL.
+
+## Reference
+
+`docs/rop-notes/rop-580-guide.txt` is the community guide for the nX-U16 ROP
+chain (register layout, chain encoding, `printline` / `smallprint` /
+`render_bitmap` / `line_draw` ABIs, loop techniques, launcher bytes) and
+`docs/rop-notes/rop-ez.txt` is the short "easy ROP" cheat sheet. These are the
+ground truth for the ABI implemented here.

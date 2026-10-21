@@ -1,5 +1,18 @@
-// ROP payload: draw a diagonal line and print a label.
-// Same CWiz syntax as every other .cwiz file, plus the #rop directive.
+// 42_rop_line.cwiz - draw a diagonal line with the line_draw gadget.
+//
+// What it does:
+//   Draws a line from the top-left corner to the bottom-right corner and
+//   prints a label on line 1.
+//
+// How to run it:
+//   1. Build this file in the Wiz tab of CasioEmuMsvc (the "#rop" directive
+//      selects the gadget-chain backend).
+//   2. Inject the payload at E9E0 ("#org E9E0" below).
+//   3. In the calculator's program mode press LEFT, then EXE.
+//
+// The launch sequence of every ROP program is:
+//   setlr(); setsfr(); screen_del();
+// and render() is mandatory after drawing.
 #rop
 #for 580
 #org E9E0
@@ -9,7 +22,15 @@ int main() {
     setlr();
     setsfr();
     screen_del();
+
+    // line(x1, y1, x2, y2)
+    //   The screen is 192 x 64 px: x = 0..191, y = 0..63.
+    //   The gadget packs the four coordinates into XR0, one byte each:
+    //   xr0 = hex <x1> <y1> <x2> <y2>
     line(0, 0, 191, 62);
+
+    // A label on line 1 (linepos 0x01).
     print(0x30, 0x01, "ROP LINE");
+
     render();
 }

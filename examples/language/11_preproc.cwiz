@@ -10,7 +10,7 @@
 // Run this on both machines: the same source picks a different row count, a
 // different label and a different number of bars.
 
-#include "07_hud.cwiz"        // inlined once, thanks to #pragma once
+#include "11_hud.cwiz"        // inlined once, thanks to #pragma once
 
 #define WIDTH 40              // object-like macros
 #define HEIGHT 8

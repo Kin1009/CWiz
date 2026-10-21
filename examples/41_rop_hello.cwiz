@@ -1,22 +1,38 @@
-// ROP payload in CWiz syntax.
+// 41_rop_hello.cwiz - the smallest possible ROP payload.
 //
-// #rop switches this file to the gadget-chain backend: the program is compiled
-// to a ROP payload instead of a ROM image, and "Build & Run" injects it into
-// the emulator's RAM at #org.
+// What it does:
+//   Prints "HELLO ROP" on line 1 of the calculator screen.
 //
-// print(x, y, "text") uses the calculator's line-print ABI:
-//   x = font/column byte (0x30 is the normal small font)
-//   y = line position (0x01 = line 1, 0x11 = line 2, ...)
+// How to run it:
+//   1. Build this file in the Wiz tab of CasioEmuMsvc.  The "#rop" directive
+//      selects the gadget-chain (ROP) backend, so "Build" produces a payload
+//      binary instead of a ROM image.
+//   2. Inject the payload at E9E0 (the address given by "#org E9E0" below).
+//   3. In the calculator's program mode press LEFT, then EXE.  The common
+//      launcher copies the payload to the execution area and runs it.
+//
+// Every ROP program starts with the same three calls:
+//   setlr()      - establish LR, otherwise the chain hangs in the BL calls
+//   setsfr()     - initialize the calculator SFR / display + keyboard state
+//   screen_del() - clear the screen buffer (buffer_clear)
+// and render() is mandatory after drawing: without it nothing appears.
 #rop
 #for 580
 #org E9E0
 #launcher common
 
 int main() {
-    // ROP startup: establish LR and initialize the calculator SFR/display state.
     setlr();
     setsfr();
     screen_del();
+
+    // print(pad, linepos, "text")
+    //   pad     = 0x30, the normal printline padding
+    //   linepos = 0x01 / 0x11 / 0x21 / 0x31 for lines 1..4
+    // print() always uses the large font (0x0E) and takes at most 17
+    // characters per line.  Only the large font can render Vietnamese text.
     print(0x30, 0x01, "HELLO ROP");
+
+    // render() copies the screen buffer to the display.
     render();
 }

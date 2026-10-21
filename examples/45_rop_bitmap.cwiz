@@ -1,0 +1,38 @@
+// 45_rop_bitmap.cwiz - draw a bitmap sprite with the render_bitmap gadget.
+//
+// What it does:
+//   Draws an 8x8 hollow square at (10, 10) and prints a label on line 1.
+//
+// How to run it:
+//   1. Build this file in the Wiz tab of CasioEmuMsvc (the "#rop" directive
+//      selects the gadget-chain backend).
+//   2. Inject the payload at E9E0 ("#org E9E0" below).
+//   3. In the calculator's program mode press LEFT, then EXE.
+//
+// The launch sequence of every ROP program is:
+//   setlr(); setsfr(); screen_del();
+// and render() is mandatory after drawing.
+#rop
+#for 580
+#org E9E0
+#launcher common
+
+int main() {
+    setlr();
+    setsfr();
+    screen_del();
+
+    // bitmap(x, y, w, h, "data")
+    //   The screen is 192 x 64 px, so x = 0..191 and y = 0..63.
+    //   The bitmap data is a hex string: one byte holds 8 horizontal pixels,
+    //   the most significant bit is the leftmost pixel, and the data must be
+    //   exactly w * h / 8 bytes long.
+    //
+    //   ff 81 81 81 81 81 81 ff  ->  an 8x8 hollow square
+    //   (the gadget packs the geometry into XR0 as x, y, w, h)
+    bitmap(10, 10, 8, 8, "ff818181818181ff");
+
+    print(0x30, 0x01, "ROP BITMAP");
+
+    render();
+}

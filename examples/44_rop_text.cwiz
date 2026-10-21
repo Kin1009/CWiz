@@ -1,0 +1,39 @@
+// 44_rop_text.cwiz - the three font sizes, side by side.
+//
+// What it does:
+//   Line 1 is printed with print() (the large font, 0x0E), line 2 with
+//   print_small() and font 0x08 (small 8x8) and line 3 with print_small()
+//   and font 0x0A (medium).
+//
+// How to run it:
+//   1. Build this file in the Wiz tab of CasioEmuMsvc (the "#rop" directive
+//      selects the gadget-chain backend).
+//   2. Inject the payload at E9E0 ("#org E9E0" below).
+//   3. In the calculator's program mode press LEFT, then EXE.
+//
+// The launch sequence of every ROP program is:
+//   setlr(); setsfr(); screen_del();
+// and render() is mandatory after printing.
+#rop
+#for 580
+#org E9E0
+#launcher common
+
+int main() {
+    setlr();
+    setsfr();
+    screen_del();
+
+    // print(pad, linepos, "text")
+    //   print() always uses the large font (0x0E), max 17 characters, and it
+    //   is the only font that can render Vietnamese text.
+    print(0x30, 0x01, "Xin chào");
+
+    // print_small(font, linepos, "text")
+    //   font = 0x08 (small), 0x0A (medium), 0x0E (large)
+    //   linepos = 0x01 / 0x11 / 0x21 / 0x31 for lines 1..4
+    print_small(0x08, 0x11, "small 8x8 font");
+    print_small(0x0A, 0x21, "medium 10x10 font");
+
+    render();
+}

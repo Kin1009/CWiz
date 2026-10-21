@@ -10,6 +10,7 @@ cmake-build-*/
 # ROM images and assembly listings produced next to a source file
 *.bin
 /examples/*.asm
+/examples/**/*.asm
 /t1.asm
 out.asm
 out.bin

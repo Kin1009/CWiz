@@ -1,7 +1,19 @@
-// ROP payload using the common launcher ("launcher chung").
+// 43_rop_common.cwiz - two prints on two different lines.
 //
-// Inject the payload at E9E0.  The launcher copies it to D730 and runs it
-// there, which is how most existing 580 ROP programs are entered.
+// What it does:
+//   Shows how the "linepos" argument selects the text row: line 1 uses 0x01
+//   and line 2 uses 0x11 (then 0x21 for line 3 and 0x31 for line 4).
+//
+// How to run it:
+//   1. Build this file in the Wiz tab of CasioEmuMsvc (the "#rop" directive
+//      selects the gadget-chain backend).
+//   2. Inject the payload at E9E0 ("#org E9E0" below).
+//   3. In the calculator's program mode press LEFT, then EXE.
+//
+// This example uses the community "launcher chung" ("#launcher common"):
+// the launcher is typed into the calculator's program input area (D180 on the
+// 580, 9268 on the 880) and it copies the injected payload from the backup
+// area to the execution area before running it.
 #rop
 #for 580
 #org E9E0
@@ -11,7 +23,10 @@ int main() {
     setlr();
     setsfr();
     screen_del();
-    print(0x30, 0x01, "COMMON");
-    print(0x30, 0x11, "LAUNCHER");
+
+    // print(pad, linepos, "text"), pad = 0x30.
+    print(0x30, 0x01, "COMMON");    // line 1  (linepos 0x01)
+    print(0x30, 0x11, "LAUNCHER");  // line 2  (linepos 0x11)
+
     render();
 }
