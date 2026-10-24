@@ -27,3 +27,16 @@ __pycache__/
 .vscode/
 .recon/
 .sentry/
+
+# ------------------------------------------------------------------ local firmware research
+# ROM images and their reverse-engineering workspace stay local; these can be
+# copyrighted, large, or machine-specific and are not part of the toolchain.
+/roms/
+/chats.txt
+/disassembly.txt
+/r2_*.txt
+/build_chunk.py
+/build_sci.py
+/check-updates
+/verify.py
+/docs/getkey_*.txt

@@ -282,9 +282,6 @@ string-pool mismatch.
 
 `docs/rop-notes/rop-580-guide.txt` is the community guide for the nX-U16 ROP
 chain (register layout, chain encoding, `printline` / `smallprint` /
-`render_bitmap` / `line_draw` ABIs, loop techniques, launcher bytes) and
-`docs/rop-notes/rop-ez.txt` is the short "easy ROP" cheat sheet. `chats.txt`
-holds the community chat dump these notes were distilled from: it documents
-the `getkey` / `cmp_ea` key tables, the `adr_of [-2]` branch convention, the
-KI/KO key codes and the memory gadgets (`[er0]=r2`, `[er8]+=er2`). These are
-the ground truth for the ABI implemented here.
+`render_bitmap` / `line_draw` ABIs, loop techniques, launcher bytes), and
+`docs/rop-notes/rop-ez.txt` is the short "easy ROP" cheat sheet. The ABI
+details implemented here are recorded above and covered by the compiler tests.
