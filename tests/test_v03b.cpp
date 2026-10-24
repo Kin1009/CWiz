@@ -5,6 +5,7 @@
 #include <string>
 
 #include "font6x8.hpp"
+#include "font_cw.hpp"
 #include "harness.hpp"
 
 using namespace wt;
@@ -28,6 +29,20 @@ std::set<std::pair<int, int>> text_ref(int x, int y, const std::string& s) {
     return out;
 }
 
+std::set<std::pair<int, int>> cw_text_ref(int x, int y, const std::string& s) {
+    std::set<std::pair<int, int>> out;
+    for (size_t i = 0; i < s.size(); i++) {
+        int cp = (unsigned char)s[i];
+        if (cp < FONT_CW_FIRST || cp > FONT_CW_LAST) cp = '?';
+        int base = (cp - FONT_CW_FIRST) * FONT_CW_H;
+        for (int r = 0; r < FONT_CW_H; r++)
+            for (int k = 0; k < FONT_CW_W; k++)
+                if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
+                    out.insert({x + (int)i * FONT_CW_W + k, y + r});
+    }
+    return out;
+}
+
 bool subset(const std::set<std::pair<int, int>>& a, const std::set<std::pair<int, int>>& b) {
     for (auto& p : a)
         if (!b.count(p)) return false;
@@ -42,7 +57,7 @@ void wt::run_v03b() {
         std::string src = "\nrom8 name = \"Bob\"\ndef main():\n    score = 42\n"
                           "    print(2, 3, \"Score \", score, \" of \", -7)\n"
                           "    print(2, 20, name)\n    e = print(2, 40, 123)\n"
-                          "    print(100, 40, e)\n";
+                          "    print(100, 40, e)\n    render()\n";
         Machine r = build_and_run(src);
         std::set<std::pair<int, int>> exp = text_ref(2, 3, "Score 42 of -7");
         for (auto& p : text_ref(2, 20, "Bob")) exp.insert(p);
@@ -54,6 +69,17 @@ void wt::run_v03b() {
                                       std::inserter(sym, sym.begin()));
         check("print: strings + numbers chained, rom8 name as text, returns end x", got == exp,
               ss(sym));
+    }
+    {
+        std::string src = "\nrom8 name = \"Bob\"\ndef main():\n    clear()\n"
+                          "    e = print_cw(2, 3, \"A\", 42)\n    print_cw(2, 20, name)\n"
+                          "    print_cw(e, 3, 7)\n    render()\n";
+        Machine r = build_and_run(src);
+        std::set<std::pair<int, int>> exp = cw_text_ref(2, 3, "A42");
+        for (auto& p : cw_text_ref(2, 20, "Bob")) exp.insert(p);
+        for (auto& p : cw_text_ref(2 + 3 * FONT_CW_W, 3, "7")) exp.insert(p);
+        check("print_cw: Wiz CW Display strings, numbers and return x",
+              lit(r.m) == exp, ss(lit(r.m)));
     }
 
     // ---------------- asm hline / fillrect vs python model, both draw modes
@@ -94,8 +120,9 @@ void wt::run_v03b() {
                 body += "    fillrect(" + std::to_string(t[0]) + ", " + std::to_string(t[1]) + ", " +
                         std::to_string(t[2]) + ", " + std::to_string(t[3]) + ", " +
                         std::to_string(t[4]) + ")\n";
+            body += mode ? "    flip()\n" : "    render()\n";
             Machine r = build_and_run(body, {}, 80000000);
-            auto got = mode ? fb(r.m) : lit(r.m);
+            auto got = lit(r.m);
             std::set<std::pair<int, int>> sym;
             std::set_symmetric_difference(got.begin(), got.end(), exp.begin(), exp.end(),
                                           std::inserter(sym, sym.begin()));
@@ -115,7 +142,7 @@ void wt::run_v03b() {
 
     // ---------------- pong
     {
-        std::string text = wiz::read_text_file(root_path("examples/05_pong.wz"));
+        std::string text = wiz::read_text_file(root_path("examples/input/02_pong.wz"));
         Machine r = run_src(text, "", {}, 30000000);
         const auto& V = r.vars;
         auto g = [&](const std::string& n) { return var_of(r.m, V, n); };
@@ -151,7 +178,7 @@ void wt::run_v03b() {
 
     // ---------------- demo 06
     {
-        std::string text = wiz::read_text_file(root_path("examples/06_demo.wz"));
+        std::string text = wiz::read_text_file(root_path("examples/math/02_demo.wz"));
         Machine r = run_src(text, "", {}, 8000000);
         check("demo: n=5 -> fib=5, 5!=120 shown",
               subset(text_ref(4, 11, "n = 5"), lit(r.m)) &&

@@ -9,13 +9,14 @@
     { "include": "#numbers" },
     { "include": "#keywords" },
     { "include": "#builtins" },
-    { "include": "#definitions" }
+    { "include": "#definitions" },
+    { "include": "#variables" }
   ],
   "repository": {
     "directives": {
       "patterns": [
         {
-          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot)\\b(.*)$",
+          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot|rop|org|launcher|pad|nopad|__asm__|__hex__)\\b(.*)$",
           "captures": {
             "1": { "name": "punctuation.definition.directive.wiz" },
             "2": { "name": "keyword.control.directive.wiz" },
@@ -59,7 +60,7 @@
       "patterns": [
         {
           "name": "keyword.control.wiz",
-          "match": "\\b(def|return|if|elif|else|for|while|break|continue|pass|and|or|not|in|is|True|False|None)\\b"
+          "match": "\\b(def|return|if|elif|else|for|while|break|continue|pass|and|or|not|in|is|True|False|None|__asm__|__hex__)\\b"
         },
         {
           "name": "storage.type.wiz",
@@ -71,7 +72,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.wiz",
-          "match": "\\b(clear|pixel|hline|vline|rect|fillrect|line|circle|disc|text|char|print|num|key|key_hit|key_down|wait_key|delay|abs|min|max|rand|peek|poke|rpeek|rpoke|_rpeek)\\b"
+          "match": "\\b(clear|pixel|hline|vline|rect|fillrect|line|circle|disc|text|char|glyph_cw|char_cw|text_cw|num_cw|print|print_cw|num|key|key_hit|key_down|wait_key|delay|abs|min|max|rand|peek|poke|rpeek|rpoke|getkey|getscancode|getscancode_nodelay|getkeycode|_rpeek)\\b"
         },
         {
           "name": "constant.language.key.wiz",
@@ -88,6 +89,22 @@
         {
           "name": "variable.other.wiz",
           "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.wiz",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.wiz",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
         }
       ]
     }

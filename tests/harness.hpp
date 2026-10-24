@@ -106,11 +106,18 @@ inline std::set<std::pair<int, int>> lit(const wiz::U8& m) {
     return out;
 }
 
+// The shadow buffer (SB2): drawing primitives write here; render()/flip() is
+// the only path to the visible LCD (SB1).
+inline int sb2_base(const wiz::U8& m) {
+    return m.tg.name == "cwii" ? 0xCA54 : 0xDDD3;
+}
+
 inline std::set<std::pair<int, int>> fb(const wiz::U8& m) {
     std::set<std::pair<int, int>> out;
-    for (int y = 0; y < 64; y++)
+    const int base = sb2_base(m) + 32 * m.tg.row_off;
+    for (int y = 0; y < m.tg.rows; y++)
         for (int x = 0; x < 192; x++)
-            if (m.mem[0xE000 + y * 32 + (x >> 3)] & (0x80 >> (x & 7))) out.insert({x, y});
+            if (m.mem[base + y * 32 + (x >> 3)] & (0x80 >> (x & 7))) out.insert({x, y});
     return out;
 }
 

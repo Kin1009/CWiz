@@ -1,6 +1,7 @@
 // test_cwiz.cpp - CWiz language tests (ported from tests/test_cwiz.py).
 #include <string>
 
+#include "font_cw.hpp"
 #include "harness.hpp"
 
 using namespace wt;
@@ -16,6 +17,20 @@ Machine run(const std::string& src, const std::string& target = "cwii", long ste
 }
 
 int pix1(const wiz::U8& m, int x, int y) { return m.pixel(x, y) ? 1 : 0; }
+
+std::set<std::pair<int, int>> cw_ref(int x, int y, const std::string& s) {
+    std::set<std::pair<int, int>> out;
+    for (size_t i = 0; i < s.size(); i++) {
+        int cp = (unsigned char)s[i];
+        if (cp < FONT_CW_FIRST || cp > FONT_CW_LAST) cp = '?';
+        int base = (cp - FONT_CW_FIRST) * FONT_CW_H;
+        for (int r = 0; r < FONT_CW_H; r++)
+            for (int k = 0; k < FONT_CW_W; k++)
+                if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
+                    out.insert({x + (int)i * FONT_CW_W + k, y + r});
+    }
+    return out;
+}
 
 struct ErrRes {
     bool ok;
@@ -205,7 +220,7 @@ void wt::run_cwiz() {
 
     // --------------------------------------------------------------------- builtins / library
     {
-        Machine r = run("void main() { clear(); pixel(10, 20); }", "cwii");
+        Machine r = run("void main() { clear(); pixel(10, 20); render(); }", "cwii");
         int total = 0;
         for (int x = 0; x < 192; x++)
             for (int y = 0; y < 64; y++) total += pix1(r.m, x, y);
@@ -213,20 +228,40 @@ void wt::run_cwiz() {
               std::to_string(total));
     }
     {
-        Machine r = run("void main() { clear(); hline(0, 10, 5); }");
+        const std::string src =
+            "int R; void main() { memoryWrite(0xD100, 2, 0x1234); "
+            "R = memoryRead(0xD100, 2); setStatus(SHIFT, HIGH); "
+            "R = R + memoryRead(SB2 + SHIFT - 0xF800, 1); "
+            "setStatus(SUN_CHRG, HIGH); "
+            "R = R + memoryRead(SB2 + SUN_CHRG - 0xF800, 1); "
+            "renderStatus(); setStatus(SHIFT, LOW); setStatus(SUN_CHRG, LOW); }";
+        for (const std::string target : {"cw", "cwii"}) {
+            Machine r = run(src, target);
+            const int offset = target == "cwii" ? 1 : 0;
+            const int base = target == "cwii" ? 0xCA54 : 0xDDD3;
+            check("memory helpers and status icons work (" + target + ")",
+                  var_of(r.m, r.vars, "R") == 0x1236 && r.m.mem[base + offset] == 0 &&
+                      r.m.planes[0][offset] == 1 &&
+                      r.m.mem[base + 22] == 0 && r.m.planes[0][22] == 1 &&
+                      (target != "cwii" || (r.m.planes[1][offset] == 1 && r.m.planes[1][22] == 1)),
+                  ex(var_of(r.m, r.vars, "R"), r.m.mem[base + offset], r.m.planes[0][offset]));
+        }
+    }
+    {
+        Machine r = run("void main() { clear(); hline(0, 10, 5); render(); }");
         bool ok = true;
         for (int x = 0; x < 10; x++) ok = ok && pix1(r.m, x, 5);
         check("hline() draws a 10-pixel row (x1 exclusive)", ok && !pix1(r.m, 10, 5));
     }
     {
-        Machine r = run("void main() { clear(); fillrect(0, 0, 4, 3); }");
+        Machine r = run("void main() { clear(); fillrect(0, 0, 4, 3); render(); }");
         bool ok = true;
         for (int x = 0; x < 4; x++)
             for (int y = 0; y < 3; y++) ok = ok && pix1(r.m, x, y);
         check("fillrect() fills 4x3", ok);
     }
     {
-        Machine r = run("void main() { clear(); rect(0, 0, 5, 5); }");
+        Machine r = run("void main() { clear(); rect(0, 0, 5, 5); render(); }");
         check("rect() draws a 5x5 outline",
               pix1(r.m, 0, 0) && pix1(r.m, 4, 4) && !pix1(r.m, 2, 2));
     }
@@ -246,11 +281,29 @@ void wt::run_cwiz() {
               std::to_string(var_of(r.m, r.vars, "R")));
     }
     {
-        Machine r = run("int R; void main() { clear(); print(0, 0, \"n=\", 42); R = 1; }");
+        Machine r = run("int R; void main() { clear(); print(0, 0, \"n=\", 42); R = 1; render(); }");
         bool any = false;
         for (int x = 0; x < 60; x++)
             for (int y = 0; y < 8; y++) any = any || pix1(r.m, x, y);
         check("print() compiles and runs", var_of(r.m, r.vars, "R") == 1 && any);
+    }
+    {
+        Machine r = run("int R; void main() { clear(); R = text_cw(2, 3, \"A\"); render(); }");
+        check("text_cw() draws native 11 px glyphs and returns the end x",
+              var_of(r.m, r.vars, "R") == 2 + FONT_CW_W && lit(r.m) == cw_ref(2, 3, "A"),
+              ex(var_of(r.m, r.vars, "R"), lit(r.m)));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); R = num_cw(0, 0, -32768); render(); }");
+        check("num_cw() renders -32768 at an 11 px advance",
+              var_of(r.m, r.vars, "R") == 6 * FONT_CW_W && lit(r.m) == cw_ref(0, 0, "-32768"),
+              ex(var_of(r.m, r.vars, "R"), lit(r.m)));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); print_cw(0, 0, \"A\", 42); R = 1; render(); }");
+        check("print_cw() lays out the CW Display font",
+              var_of(r.m, r.vars, "R") == 1 && lit(r.m) == cw_ref(0, 0, "A42"),
+              ex(var_of(r.m, r.vars, "R"), lit(r.m)));
     }
     {
         Machine r = run("int R; void main() { srand(1); R = rand(100); }");

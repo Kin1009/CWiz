@@ -86,7 +86,7 @@ void wt::run_v03() {
     // ------------------------------------------------------------------ text / num rendering
     {
         Machine r = run("\ndef main():\n    text(3, 5, \"Hello, World! 0123456789\")\n"
-                        "    text(100, 40, \"A~z\")\n    text(-4, 60, \"clip\")\n");
+                        "    text(100, 40, \"A~z\")\n    text(-4, 60, \"clip\")\n    render()\n");
         auto exp = text_ref(3, 5, "Hello, World! 0123456789");
         for (auto& p : text_ref(100, 40, "A~z")) exp.insert(p);
         for (auto& p : text_ref(-4, 60, "clip")) exp.insert(p);
@@ -100,6 +100,7 @@ void wt::run_v03() {
         for (size_t i = 0; i < cases.size(); i++)
             prog += "    num(" + std::to_string(4 + (int)(i % 2) * 90) + ", " +
                     std::to_string(2 + (int)(i / 2) * 10) + ", " + std::to_string(cases[i]) + ")\n";
+        prog += "    render()\n";
         Machine r = run(prog, 30000000);
         std::set<std::pair<int, int>> exp;
         for (size_t i = 0; i < cases.size(); i++)
@@ -121,7 +122,7 @@ void wt::run_v03() {
     // ------------------------------------------------------------------ sprite
     {
         Machine r = run("\nrom8 arrow = [0x18, 0x3C, 0x7E, 0xFF, 0x18, 0x18, 0x18, 0x18,   0xAA, 0x55]\n"
-                        "def main():\n    sprite(20, 10, 8, 8, arrow)\n    sprite(60, 30, 10, 1, arrow + 8)\n");
+                        "def main():\n    sprite(20, 10, 8, 8, arrow)\n    sprite(60, 30, 10, 1, arrow + 8)\n    render()\n");
         std::set<std::pair<int, int>> exp;
         int data[8] = {0x18, 0x3C, 0x7E, 0xFF, 0x18, 0x18, 0x18, 0x18};
         for (int rr = 0; rr < 8; rr++)

@@ -52,7 +52,7 @@ int run_prog(const std::string& prog, const std::vector<std::string>& args, std:
 }  // namespace
 
 void wt::run_cwapp() {
-    std::string SRC = wiz::read_text_file(root_path("examples/10_app_hello.wz"));
+    std::string SRC = wiz::read_text_file(root_path("examples/cwapp/02_app_hello.wz"));
     wiz::BuildResult br = wiz::build_source(SRC, "cwapp");
     check("cwapp: code is placed at 3:0E40 (trampoline first)",
           br.syms.at("_TRAMP") == 0x30E40 && br.syms.at("_APP") > 0x30E40);
@@ -121,7 +121,7 @@ void wt::run_cwapp() {
         std::string out = "/tmp/_cwapp_patched.bin";
         std::string log;
         int rc = run_prog(bin_sibling("patch_menu"),
-                          {rp, root_path("examples/10_app_hello.wz"), out}, &log);
+                          {rp, root_path("examples/cwapp/02_app_hello.wz"), out}, &log);
         check("patch_menu.py runs on the sample ROM", rc == 0, log);
         bool ok1 = false, ok2 = false;
         std::vector<uint8_t> pr = wiz::read_binary_file(out, &ok1);

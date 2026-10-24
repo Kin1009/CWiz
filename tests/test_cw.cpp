@@ -159,10 +159,10 @@ void wt::run_cw() {
             std::string m = e.what(), ml = wiz::to_lower(m);
             ok = m.find("RAM") != std::string::npos || ml.find("memory") != std::string::npos;
         }
-        check("6000-byte array: fits cwii (20 KB vars), rejected on cw (4 KB vars)", ok);
-        Machine r = run("big = [0] * 1900\ndef main():\n    big[1899] = 5\n    big[0] = 6\n", "cw");
-        check("1900-element array fits cw and stays in RAM 0xD000-0xDFFF",
-              r.m.mem[0xD000 + 2 * 1899] == 5 && r.m.mem[0xD000] == 6, r.why);
+        check("6000-byte array: fits cwii, rejected on cw (SB2 + stack reserved)", ok);
+        Machine r = run("big = [0] * 1500\ndef main():\n    big[1499] = 5\n    big[0] = 6\n", "cw");
+        check("1500-element array fits cw below the SB2 shadow buffer",
+              r.m.mem[0xD000 + 2 * 1499] == 5 && r.m.mem[0xD000] == 6, r.why);
     }
 
     // ------------------------------------------------- boot translation sanity
@@ -205,7 +205,7 @@ void wt::run_cw() {
             if (l.find("0F037H") != std::string::npos) n_cw++;
         for (auto& l : ci)
             if (l.find("0F037H") != std::string::npos) n_ii++;
-        check("cw listing has no write to 0F037H; cwii listing has 4", n_cw == 0 && n_ii == 4,
+        check("cw listing has no write to 0F037H; cwii render routines select both planes", n_cw == 0 && n_ii == 2,
               ex(n_cw, n_ii));
     }
 
@@ -216,7 +216,7 @@ void wt::run_cw() {
         "    circle(150, 30, 20)\n    disc(40, 50, 8)\n    text(70, 5, \"CW vs CWII\")\n"
         "    num(70, 20, -1234)\n    sprite(100, 45, 8, 8, spr)\n    pixel(11, 11, 0)\n"
         "    hline(0, 191, 63, 0)\n    pixel(191, 0)\n    pixel(300, 5)\n";
-    const std::string direct = SCENE + "def main():\n    draw()\n";
+    const std::string direct = SCENE + "def main():\n    draw()\n    render()\n";
     const std::string buffd = SCENE + "def main():\n    buffered(1)\n    draw()\n    flip()\n";
     {
         std::map<std::string, std::set<std::pair<int, int>>> imgs;
@@ -298,10 +298,13 @@ void wt::run_cw() {
         check("cw: a user const named like a missing key is allowed", true);
 
         const auto& cwkeys = wiz::key_consts("cw");
-        bool uniq = ((int)cwkeys.size() - 1) == 49;
+        int key_count = 0;
+        for (const auto& kv : cwkeys)
+            if (kv.first.rfind("K_", 0) == 0 && kv.first != "K_NONE") key_count++;
+        bool uniq = key_count == 49;
         std::set<int> seen;
         for (auto& kv : cwkeys) {
-            if (kv.first == "K_NONE") continue;
+            if (kv.first.rfind("K_", 0) != 0 || kv.first == "K_NONE") continue;
             if (!(kv.second >= 0 && kv.second < 64)) uniq = false;
             if (!seen.insert(kv.second).second) uniq = false;
         }
@@ -345,7 +348,7 @@ void wt::run_cw() {
     {
         const std::string OFFSRC =
             "def main():\n    clear()\n    pixel(0, 0)\n    pixel(0, 62)\n    pixel(191, 62)\n"
-            "    pixel(0, 63)\n    hline(0, 192, 63)\n    while True:\n        pass\n";
+            "    pixel(0, 63)\n    hline(0, 192, 63)\n    render()\n    while True:\n        pass\n";
         for (auto pr : {std::make_pair(std::string("cwii"), 0), std::make_pair(std::string("cw"), 1)}) {
             const std::string& tg = pr.first;
             int off = pr.second;

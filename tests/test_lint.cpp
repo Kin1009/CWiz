@@ -124,6 +124,61 @@ void wt::run_lint() {
               d.empty() ? "" : d[0].rule + ": " + d[0].message);
     }
 
+    // The 580 text and graphics builtins have their own ABI and must not be
+    // reported as unknown functions.
+    {
+        const std::string rop =
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() {\n"
+            "    setlr();\n"
+            "    setsfr();\n"
+            "    screen_del();\n"
+            "    print(0x30, 0x01, \"LINT ROP\");\n"
+            "    print_small(0x0E, 0x11, \"SMALL\");\n"
+            "    line(0, 0, 192, 63);\n"
+            "    rect(1, 2, 3, 4);\n"
+            "    pixel(5, 6, 1);\n"
+            "    bitmap(10, 10, 8, 8, \"ff818181818181ff\");\n"
+            "    delay(0x1F40);\n"
+            "    waitshift();\n"
+            "    set_byte(0xD138, 1);\n"
+            "    set_word(0xD138, 0x1234);\n"
+            "    add_word(0xF039, 0x0102);\n"
+            "    memcpy(0xD630, 0xD184, 0x2FE);\n"
+            "    strcpy(0xD630, 0xD184);\n"
+            "    getkey();\n"
+            "    keytable(0x0480, up, 0x0000, done);\n"
+            "up:\n"
+            "    goto done;\n"
+            "done:\n"
+            "    render();\n"
+            "}\n";
+        auto d = lint(rop, "t.cwiz", "cw");
+        check("lint: ROP builtins compile", !has(d, "compile"),
+              d.empty() ? "" : d[0].rule + ": " + d[0].message);
+    }
+
+    // The text may also be the first argument of print / print_small.
+    {
+        const std::string rop =
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { print(\"SWAP\", 0x30, 0x01); print_small(\"SWAP\", 0x0E, 0x11); }\n";
+        auto d = lint(rop, "t.cwiz", "cw");
+        check("lint: ROP print accepts the text first", !has(d, "compile"),
+              d.empty() ? "" : d[0].rule + ": " + d[0].message);
+    }
+
+    // The community launcher takes a length code and the backup / execution
+    // addresses; the linter must accept them.
+    {
+        const std::string rop =
+            "#rop\n#for 580\n#org E9E0\n#launcher common long E9E0 D730\n"
+            "int main() { render(); }\n";
+        auto d = lint(rop, "t.cwiz", "cw");
+        check("lint: ROP launcher options compile", !has(d, "compile"),
+              d.empty() ? "" : d[0].rule + ": " + d[0].message);
+    }
+
     // Compiler errors are part of the linter output.
     {
         auto d = lint("int main() { return does_not_exist; }\n");

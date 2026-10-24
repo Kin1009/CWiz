@@ -81,8 +81,11 @@ language-specific `editor.fontFamily`, so `.wz`/`.cwiz` files keep your normal
 editor font.
 
 The CW font set is used only by compiled Wiz/CWiz programs when they draw text on
-the calculator LCD. That glyph table is part of the toolchain
-(`compiler/src/font6x8.hpp`), generated from `cw-mono.ttf`.
+the calculator LCD. The toolchain has two glyph tables: the original 6x8 table
+(`compiler/src/font6x8.hpp`, generated from `cw-mono.ttf`) and the native
+ClassWiz CW Display 11x13 table (`compiler/src/font_cw.hpp`, rasterised at 1x
+from `Wenti-D/ClasswizDisplayFont`). The latter is used by `print_cw`,
+`text_cw`, `num_cw` and `char_cw`/`glyph_cw`.
 
 ## Build
 

@@ -40,15 +40,21 @@ languages. You cannot define a function with one of these names. Unless noted, a
 |------|------|---------|-------------|
 | `pixel(x, y)` | 2 | — | Set the pixel at `(x, y)`. Off-screen coordinates are ignored. |
 | `pixel(x, y, c)` | 3 | — | Set (`c != 0`) or clear (`c == 0`) the pixel. |
-| `clear()` | 0 | — | Clear the LCD (direct mode) or the back buffer (buffered mode). |
+| `clear()` | 0 | — | Clear the shadow buffer (SB2). Call `render()` to show it. |
+| `clearRender()` | 0 | — | Clear SB1 first, then SB2 (immediately visible). |
 | `key()` | 0 | scan index | Index `0..63` of the key being held (`8*KO + KI`, MSB first), or `-1` if none. |
 | `key_down(k)` | 1 | 0/1 | `1` while key `k` is held. |
 | `key_hit(k)` | 1 | 0/1 | `1` only on the call where `k` went from released to held. Call it every loop iteration. |
 | `delay(n)` | 1 | — | Busy-wait `n` units. Units are uncalibrated. |
 | `peek(addr)` | 1 | 0..255 | Unsigned byte at `addr` (RAM, SFR or ROM). |
 | `poke(addr, v)` | 2 | — | Store the **low byte** of `v` at `addr`. |
-| `buffered(on)` | 1 | — | `on != 0`: draw into the back buffer (cleared now). `on == 0`: draw straight to the LCD. |
-| `flip()` | 0 | — | Copy the back buffer to the LCD. |
+| `memoryRead(addr, len)` | 2 | 8-/16-bit value | Read 1 byte unsigned or 2 bytes as a signed 16-bit little-endian value; other lengths return 0. |
+| `memoryWrite(addr, len, data)` | 3 | — | Write the low 1 or 2 bytes of `data` little-endian; other lengths do nothing. |
+| `setStatus(icon, status)` | 2 | — | Set a target-supported status icon to `HIGH` (1) or `LOW` (0) in SB2. Call `render()` to show it. |
+| `render()` | 0 | — | Copy the shadow buffer (SB2) to the LCD (SB1). This is the **only** call that makes drawing visible. |
+| `renderStatus()` | 0 | — | Copy only the first 23 status bytes from SB2 to the LCD plane(s). |
+| `buffered(on)` | 1 | — | Compatibility no-op. Drawing always targets SB2. |
+| `flip()` | 0 | — | Alias for `render()` (kept for older programs). |
 | `exit()` | 0 | — | **cwapp only.** Leave the program and restart the firmware (returns to the menu). |
 | `_hspan(x0, x1, y, c)` | 4 | — | Internal fast span fill, `x0..x1-1`. Requires `0 <= x0 < x1 <= 192`, `0 <= y < ROWS`. |
 | `_rpeek(addr)` | 1 | 0..255 | Internal: like `peek` but assumes the data segment of ROM tables (used on `cwapp`). |
@@ -110,10 +116,15 @@ All coordinates are clipped to the visible screen. `c` is the colour: non-zero d
 | `char(x, y, c)` / `glyph(x, y, c)` | — | Draw one character, ASCII code `c` (out of `32..126` draws `?`). Wiz: `char`; CWiz: `glyph`. |
 | `text(x, y, s)` | end `x` | Draw a NUL-terminated string from ROM. |
 | `num(x, y, n)` | end `x` | Draw signed decimal `n`. |
+| `char_cw(x, y, c)` / `glyph_cw(x, y, c)` | — | Draw one native ClassWiz CW Display character (`11x13`, 1x). Wiz: `char_cw`; CWiz: `glyph_cw`. |
+| `text_cw(x, y, s)` | end `x` | Draw a string with the native CW Display font. |
+| `num_cw(x, y, n)` | end `x` | Draw signed decimal `n` with the native CW Display font. |
 | `sprite(x, y, w, h, data)` | — | Draw a 1-bit-per-pixel bitmap; `data` is a `rom8` table (or table + offset). |
 
 CWiz names its glyph helper `glyph` because `char` is a reserved word (it is a type). Wiz names it
-`char`.
+`char`.  The CW Display helpers advance 11 px and draw a 13-row cell (12 px cap height plus one
+descender row); the font is rasterised at its native 1x size and is not scaled to 6x8.  The 2.4 KB
+table is included only when one of the `*_cw` functions is used.
 
 ### `print`
 
@@ -125,6 +136,20 @@ the final `x`. Each argument is rendered as **text** if it is a string literal o
 ```python
 print(4, 4, "Score ", score, " / ", 100)    # -> "Score 42 / 100"
 ```
+
+### `print_cw`
+
+`print_cw(x, y, a, b, c, …)` is the same layout rule using the native ClassWiz CW Display
+(`text_cw`/`num_cw`).  It is a separate set, so the original 6x8 `print()` output is unchanged.
+Both models render it at native 1x: 11 px advance, 12 px cap height, 13-row cell.  The table
+covers printable ASCII (`32..126`); Wiz strings are still byte-based.
+
+```c
+print_cw(2, 2, "ClassWiz CW");        // 11 px per character
+print_cw(2, 16, "score ", score);     // strings and numbers
+```
+
+Use 14 px between baselines (for example `y = 2, 16, 30, 44`) to leave a one-pixel gap.
 
 ---
 
@@ -168,17 +193,19 @@ Example: `if key_hit(K_OK): …`
 
 ## Memory map
 
-Variables/arrays are allocated upward from `var_base`; the runtime state and stack live above.
+Variables/arrays are allocated upward from `var_base`; the shadow buffer (SB2) and stack live above.
 
 | Region | `880` / `cwii` (ML620909) | `580` / `cw` / `cwapp` (ML620906) |
 |--------|---------------------------|-----------------------------------|
 | Program ROM | `0x0000`–`0x8FFF` | `0x0000`–`0xCFFF` |
-| Variables & arrays | `0x9000`–`0xDFFF` (up to 20 KB) | `0xD000`–`0xDFFF` (up to 4 KB) |
-| Back buffer | `0xE000`–`0xE7FF` | `0xE000`–`0xE7FF` |
-| Draw mode (`buffered`) | `0xE800` | `0xE800` |
+| Variables & arrays | `0x9000`–`0xCA53` (~14.9 KB) | `0xD000`–`0xDDD2` (~3.5 KB) |
+| Shadow buffer (SB2) | `0xCA54`–`0xE253` (0x1800) | `0xDDD3`–`0xE5D2` (0x800) |
 | `key_hit` bitmap | `0xE808`–`0xE80F` | `0xE808`–`0xE80F` |
-| Stack (grows down from `0xF000`) | `0xE810`–`0xF000` (~2 KB) | `0xE810`–`0xF000` (~2 KB) |
-| LCD VRAM | `0xF800` + `y*32 + (x>>3)`, plane select `0xF037` | `0xF800` + `y*32 + (x>>3)` |
+| Stack (grows down from `0xF000`) | `0xE254`–`0xF000` | `0xE5D3`–`0xF000` |
+| LCD VRAM (SB1) | `0xF800` + `y*32 + (x>>3)`, plane select `0xF037` | `0xF800` + `y*32 + (x>>3)` |
+
+All drawing primitives write **only** to SB2. `render()` copies SB2 to the LCD; without it the
+display keeps whatever was there before.
 
 On `580`, VRAM row 0 is not displayed: user `y = 0` is written to VRAM row 1 (`row_off = 1`). The
 visible height is therefore 63 rows.
@@ -508,11 +535,12 @@ f_<name>__ret:
 | `__mul16` | `ER0 × ER2` → `ER0` (low 16 bits), shift-and-add |
 | `__div16` | signed division: quotient in `ER0`, remainder in `ER2` (signs handled separately) |
 | `__shl16` / `__sra16` | `ER0 << R2` / arithmetic `ER0 >> R2` |
-| `__pixel` | plot/clear one pixel; picks LCD or back buffer from the draw-mode cell |
-| `__clear` | clear the LCD (both planes) or the back buffer |
-| `__buffered` | set the draw mode; clears the back buffer when turned on |
-| `__flip` | copy the back buffer to the LCD |
-| `__rt_init` | zero draw mode and the `key_hit` bitmap |
+| `__pixel` | plot/clear one pixel in the shadow buffer (SB2) |
+| `__clear` | zero the shadow buffer (SB2) |
+| `__render` | copy SB2 to the LCD (both bitplanes on `cwii`) |
+| `__buffered` | compatibility no-op |
+| `__flip` | branch to `__render` |
+| `__rt_init` | zero the `key_hit` bitmap |
 | `__key` | scan the key matrix → index or `-1` |
 | `__key_down` / `__key_hit` | held / edge-detect for one key |
 | `__delay` | busy loop |

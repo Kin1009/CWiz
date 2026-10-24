@@ -16,6 +16,30 @@ Machine run(const std::string& src, std::vector<std::pair<int, int>> keys = {},
 }  // namespace
 
 void wt::run_v02() {
+    // -------------------------------------------- memory helpers / status icons
+    {
+        const std::string src =
+            "result_value = 0\ndef main():\n    global result_value\n"
+            "    memoryWrite(0xD100, 2, 0x1234)\n"
+            "    result_value = memoryRead(0xD100, 2)\n    setStatus(SHIFT, HIGH)\n"
+            "    result_value += memoryRead(SB2 + SHIFT - 0xF800, 1)\n"
+            "    setStatus(SUN_CHRG, HIGH)\n"
+            "    result_value += memoryRead(SB2 + SUN_CHRG - 0xF800, 1)\n"
+            "    renderStatus()\n    setStatus(SHIFT, LOW)\n    setStatus(SUN_CHRG, LOW)\n";
+        for (const std::string target : {"cw", "cwii"}) {
+            Machine r = run_src(src, target);
+            const int offset = target == "cwii" ? 1 : 0;
+            const int base = target == "cwii" ? 0xCA54 : 0xDDD3;
+            check("Wiz memory helpers and status icons work (" + target + ")",
+                  var_of(r.m, r.vars, "result_value") == 0x1236 && r.m.mem[base + offset] == 0 &&
+                      r.m.mem[base + 22] == 0 &&
+                      r.m.planes[0][offset] == 1 &&
+                      r.m.planes[0][22] == 1 &&
+                      (target != "cwii" || (r.m.planes[1][offset] == 1 && r.m.planes[1][22] == 1)),
+                  ex(var_of(r.m, r.vars, "result_value"), r.m.mem[base + offset], r.m.planes[0][offset]));
+        }
+    }
+
     // ------------------------------------------------------------ 1. constants
     {
         Machine r = run("\nconst W = 192\nconst H = W / 3\nconst MASK = 1 << 4\n"
@@ -32,7 +56,7 @@ void wt::run_v02() {
     {
         Machine r = run("\nsentinel = 4242\ndef main():\n    pixel(-1, 5)\n    pixel(192, 5)\n"
                         "    pixel(300, 5)\n    pixel(5, 64)\n    pixel(5, -3)\n    pixel(5, 200)\n"
-                        "    pixel(0, 0)\n    pixel(191, 63)\n");
+                        "    pixel(0, 0)\n    pixel(191, 63)\n    render()\n");
         auto got = lit(r.m);
         std::set<std::pair<int, int>> want = {{0, 0}, {191, 63}};
         check("pixel clipping direct mode",

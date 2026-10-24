@@ -1,9 +1,0 @@
-# 02_text_demo - text output with the native 6x8 CW font.
-# Build: build/wizc examples/text/02_text_demo.wz
-
-def main():
-    clear()
-    print(4, 8, "TEXT DEMO")
-    print(4, 20, "Score: 99")
-    print(4, 32, "Hello, Wiz!")
-    wait_key()

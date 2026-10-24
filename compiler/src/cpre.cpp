@@ -280,6 +280,7 @@ public:
 
     bool has_cwapp() const { return has_cwapp_; }
     int slot() const { return slot_; }
+    std::string binary_path() const { return binary_path_; }
 
 private:
     struct Frame {
@@ -299,6 +300,7 @@ private:
     bool has_cwapp_ = false;
     int slot_ = 2;
     bool slot_seen_ = false;
+    std::string binary_path_ = "";
     int file_line = 0;
 
     bool active() const { return active_stack.back().active; }
@@ -447,6 +449,29 @@ private:
             has_cwapp_ = true;
             slot_seen_ = false;
             push_out("for cwapp", file, line);
+            return;
+        }
+        if (name == "org") {
+            std::string rest_o = strip(rest);
+            push_out("ORG " + rest_o, file, line);
+            return;
+        }
+        if (name == "binary") {
+            std::string rest_s = strip(rest);
+            size_t q1 = rest_s.find('"');
+            // #org directive: set assembly origin
+            if (name == "org") {
+                std::string rest_o = strip(rest);
+                push_out("ORG " + rest_o, file, line);
+                return;
+            }
+            if (q1 == std::string::npos) throw CwizError("#binary needs \"path\"", line);
+            size_t q2 = rest_s.find('"', q1 + 1);
+            if (q2 == std::string::npos) throw CwizError("#binary unterminated string", line);
+            std::string bpath = rest_s.substr(q1 + 1, q2 - q1 - 1);
+            binary_path_ = bpath;
+            // emit nothing; build_cwiz will inject DB directly
+            push_out("", file, line);
             return;
         }
         if (name == "slot") {
@@ -829,6 +854,7 @@ CwizPreprocessInfo preprocess_cwiz_info(const std::string& src, const std::strin
     info.text = pre.run(src, file);
     info.has_cwapp = pre.has_cwapp();
     info.slot = pre.slot();
+    info.binary_path = pre.binary_path();
     return info;
 }
 

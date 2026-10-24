@@ -142,7 +142,7 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
     try {
         // build_rop is the native C++ implementation of the RAC/hdcompiler
         // method: the payload and launcher are separate output blocks.
-        rop = build_rop(text, model);
+        rop = build_rop(text, model, language_of(src, args.value("lang")));
     } catch (const std::exception& e) {
         d.error(e.what(), src);
         return false;

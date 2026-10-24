@@ -10,6 +10,7 @@
 #include <set>
 
 #include "font6x8.hpp"
+#include "font_cw.hpp"
 
 namespace wiz {
 
@@ -30,6 +31,12 @@ static const std::map<std::string, int> KEY_CONSTS = {
     {"K_DEL", 0x25}, {"K_AC", 0x1D}, {"K_MUL", 0x26}, {"K_DIV", 0x1E},
     {"K_PLUS", 0x27}, {"K_MINUS", 0x1F},
     {"K_DOT", 0x0C}, {"K_SCI", 0x0D}, {"K_FORMAT", 0x0E}, {"K_EXE", 0x0F},
+    {"SB2", 0xCA54}, {"HIGH", 1}, {"LOW", 0},
+    {"SHIFT", 0xF801}, {"MATH_INP", 0xF803}, {"DEG", 0xF804}, {"RAD", 0xF805},
+    {"GRA", 0xF806}, {"FIX", 0xF807}, {"SCI", 0xF808}, {"ENG", 0xF80A},
+    {"IMAG", 0xF80B}, {"ANGL", 0xF80C}, {"SIMP", 0xF80D}, {"VERIFY", 0xF80E},
+    {"LEFT", 0xF810}, {"DOWN", 0xF811}, {"UP", 0xF812}, {"RIGHT", 0xF813},
+    {"PAUSE", 0xF815}, {"SUN_CHRG", 0xF816},
 };
 
 static const std::map<std::string, int> CW_KEY_CONSTS = {
@@ -43,6 +50,12 @@ static const std::map<std::string, int> CW_KEY_CONSTS = {
     {"K_4", 62}, {"K_5", 54}, {"K_6", 46}, {"K_MUL", 38}, {"K_DIV", 30},
     {"K_1", 63}, {"K_2", 55}, {"K_3", 47}, {"K_PLUS", 39}, {"K_MINUS", 31},
     {"K_0", 11}, {"K_DOT", 12}, {"K_EXP", 13}, {"K_ANS", 14}, {"K_EXE", 15},
+    {"SB2", 0xDDD3}, {"HIGH", 1}, {"LOW", 0},
+    {"SHIFT", 0xF800}, {"ALPHA", 0xF801}, {"M", 0xF802}, {"VAR_STO", 0xF803},
+    {"MATH_INP", 0xF805}, {"DEG", 0xF806}, {"RAD", 0xF807}, {"GRA", 0xF808},
+    {"FIX", 0xF809}, {"SCI", 0xF80A}, {"ENG", 0xF80B}, {"IMAG", 0xF80C},
+    {"ANGL", 0xF80D}, {"SIMP", 0xF80F}, {"LEFT", 0xF810}, {"DOWN", 0xF811},
+    {"UP", 0xF812}, {"RIGHT", 0xF813}, {"PAUSE", 0xF815}, {"SUN_CHRG", 0xF816},
 };
 
 }  // namespace
@@ -55,10 +68,10 @@ namespace {
 
 // ------------------------------------------------------------------ builtins
 static const std::map<std::string, std::pair<int, int>> BUILTINS = {
-    {"pixel", {2, 3}}, {"clear", {0, 0}}, {"key", {0, 0}}, {"delay", {1, 1}},
+    {"pixel", {2, 3}}, {"clear", {0, 0}}, {"clearRender", {0, 0}}, {"key", {0, 0}}, {"delay", {1, 1}},
     {"peek", {1, 1}}, {"poke", {2, 2}}, {"_hspan", {4, 4}},
     {"key_down", {1, 1}}, {"key_hit", {1, 1}}, {"buffered", {1, 1}}, {"flip", {0, 0}},
-    {"_rpeek", {1, 1}}, {"exit", {0, 0}},
+    {"render", {0, 0}}, {"renderStatus", {0, 0}}, {"_rpeek", {1, 1}}, {"exit", {0, 0}},
 };
 
 static const std::set<std::string> KEYWORDS = {
@@ -78,6 +91,14 @@ static const std::vector<std::pair<std::string, std::string>> PRELUDE = {
     {"rand",
      "\n_seed = 12345\ndef srand(s):\n    global _seed\n    _seed = s\ndef rand(n):\n"
      "    global _seed\n    _seed = _seed * 25173 + 13849\n    return ((_seed >> 1) & 0x7FFF) % n\n"},
+    {"memoryRead",
+     "\ndef memoryRead(addr, len):\n    if len == 1:\n        return peek(addr)\n"
+     "    if len == 2:\n        return peek(addr) + (peek(addr + 1) << 8)\n    return 0\n"},
+    {"memoryWrite",
+     "\ndef memoryWrite(addr, len, data):\n    if len == 1:\n        poke(addr, data)\n"
+     "    if len == 2:\n        poke(addr, data)\n        poke(addr + 1, data >> 8)\n"},
+    {"setStatus",
+     "\ndef setStatus(addr, status):\n    memoryWrite(SB2 + addr - 0xF800, 1, status != LOW)\n"},
     {"wait_key",
      "\ndef wait_key():\n    while key() != -1:\n        pass\n    while True:\n        k = key()\n"
      "        if k != -1:\n            return k\n"},
@@ -111,18 +132,31 @@ static const std::vector<std::pair<std::string, std::string>> PRELUDE = {
      "        for dx in range(0 - r, r + 1):\n            if dx * dx + dy * dy <= r2:\n"
      "                pixel(cx + dx, cy + dy, c)\n"},
     {"font", ""},  // filled in lazily (see prelude_font())
+    {"font_cw", ""},  // filled in lazily (see prelude_font_cw())
     {"char",
      "\ndef char(x, y, c):\n    if c < 32 or c > 126:\n        c = 63\n    base = (c - 32) * 8\n"
      "    for r in range(0, 8):\n        bits = _font[base + r]\n        for k in range(0, 6):\n"
      "            pixel(x + k, y + r, (bits & 128) != 0)\n            bits = bits + bits\n"},
+    {"char_cw",
+     "\ndef char_cw(x, y, c):\n    if c < 32 or c > 126: c = 63\n    base = (c - 32) * 13\n"
+     "    for r in range(0, 13):\n        bits = _cw_font[base + r]\n        for k in range(0, 11):\n"
+     "            pixel(x + k, y + r, (bits & 1024) != 0)\n            bits = bits + bits\n"},
     {"text",
      "\ndef text(x, y, s):\n    c = _rpeek(s)\n    while c != 0:\n        char(x, y, c)\n        x += 6\n"
+     "        s += 1\n        c = _rpeek(s)\n    return x\n"},
+    {"text_cw",
+     "\ndef text_cw(x, y, s):\n    c = _rpeek(s)\n    while c != 0:\n        char_cw(x, y, c)\n        x += 11\n"
      "        s += 1\n        c = _rpeek(s)\n    return x\n"},
     {"num",
      "\ndef num(x, y, n):\n    if n == -32768:\n        return text(x, y, \"-32768\")\n    if n < 0:\n"
      "        char(x, y, 45)\n        x += 6\n        n = 0 - n\n    d = 10000\n    shown = 0\n"
      "    while d > 0:\n        q = n / d\n        n = n - q * d\n        if q > 0 or shown or d == 1:\n"
      "            char(x, y, 48 + q)\n            x += 6\n            shown = 1\n        d = d / 10\n    return x\n"},
+    {"num_cw",
+     "\ndef num_cw(x, y, n):\n    if n == -32768:\n        return text_cw(x, y, \"-32768\")\n    if n < 0:\n"
+     "        char_cw(x, y, 45)\n        x += 11\n        n = 0 - n\n    d = 10000\n    shown = 0\n"
+     "    while d > 0:\n        q = n / d\n        n = n - q * d\n        if q > 0 or shown or d == 1:\n"
+     "            char_cw(x, y, 48 + q)\n            x += 11\n            shown = 1\n        d = d / 10\n    return x\n"},
     {"sprite",
      "\ndef sprite(x, y, w, h, d):\n    bw = (w + 7) >> 3\n    for r in range(0, h):\n"
      "        for k in range(0, w):\n            b = _rpeek(d + r * bw + (k >> 3))\n"
@@ -134,6 +168,16 @@ static std::string prelude_font() {
     for (int i = 0; i < FONT6X8_LEN; i++) {
         if (i) s += ", ";
         s += std::to_string(FONT6X8[i]);
+    }
+    s += "]\n";
+    return s;
+}
+
+static std::string prelude_font_cw() {
+    std::string s = "rom _cw_font = [";
+    for (int i = 0; i < FONT_CW_ROWS; i++) {
+        if (i) s += ", ";
+        s += std::to_string(FONT_CW[i]);
     }
     s += "]\n";
     return s;
@@ -982,6 +1026,7 @@ std::vector<NodeP> Compiler::add_prelude(std::vector<NodeP> prog,
     for (auto& kv : PRELUDE) {
         std::string text = kv.second;
         if (kv.first == "font") text = prelude_font();
+        if (kv.first == "font_cw") text = prelude_font_cw();
         text = replace_all(text, "@ROWS@", std::to_string(target.rows));
         text = replace_all(text, "@LAST@", std::to_string(target.rows - 1));
         if (target.rom_seg == 0) text = replace_all(text, "_rpeek(", "peek(");
@@ -1029,15 +1074,16 @@ void Compiler::rewrite_print(NodeP& n, const std::set<std::string>& data_names) 
         rewrite_print(arm.first, data_names);
         for (auto& x : arm.second) rewrite_print(x, data_names);
     }
-    if (n->k == "call" && n->name == "print") {
+    if (n->k == "call" && (n->name == "print" || n->name == "print_cw")) {
         if (n->args.size() < 3)
-            throw WizError("print(x, y, value, ...) needs at least 3 arguments", n->line);
+            throw WizError(n->name + "(x, y, value, ...) needs at least 3 arguments", n->line);
+        bool cw = n->name == "print_cw";
         NodeP cur = n->args[0];
         for (size_t i = 2; i < n->args.size(); i++) {
             const NodeP& a = n->args[i];
             bool is_text = a->k == "str" || (a->k == "var" && data_names.count(a->name));
             NodeP c = mk("call", n->line);
-            c->name = is_text ? "text" : "num";
+            c->name = is_text ? (cw ? "text_cw" : "text") : (cw ? "num_cw" : "num");
             c->args = {cur, n->args[1], a};
             cur = c;
         }
@@ -1697,7 +1743,8 @@ WizResult compile_to_asm(const std::string& src, const Target& target) {
             if (!table.count(name) && !defined.count(name)) {
                 std::vector<std::string> keys;
                 for (auto& kv : table)
-                    if (kv.first != "K_NONE") keys.push_back(kv.first.substr(2));
+                    if (kv.first.rfind("K_", 0) == 0 && kv.first != "K_NONE")
+                        keys.push_back(kv.first.substr(2));
                 std::sort(keys.begin(), keys.end());
                 throw WizError(fmt("%s is not a key on %s (keys of %s: %s)", name.c_str(),
                                    target.name.c_str(), target.name.c_str(), join(keys, " ").c_str()),

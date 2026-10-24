@@ -11,6 +11,7 @@
 #include <set>
 
 #include "font6x8.hpp"
+#include "font_cw.hpp"
 #include "wiz.hpp"  // key_consts()
 
 namespace wiz {
@@ -981,6 +982,19 @@ static std::string font_table_source() {
     return fmt("rom8 char _font[760] = \"%s\";", body.c_str());
 }
 
+// The CW Display table is a normal prelude declaration so select_prelude() only
+// emits its 2.4 KB when a _cw function actually uses it.
+static std::string cw_font_table_source() {
+    std::string s = fmt("rom _cw_font[%d] = {", FONT_CW_ROWS);
+    for (int i = 0; i < FONT_CW_ROWS; i++) {
+        if (i) s += ",";
+        if (i % 16 == 0) s += "\n";
+        s += fmt("0x%X", FONT_CW[i]);
+    }
+    s += "\n};";
+    return s;
+}
+
 static const char* PRELUDE_SRC = R"CWIZ(
 // ---- CWiz standard library (auto-included) ----
 
@@ -1108,6 +1122,50 @@ int num(int x, int y, int n) {
     }
     return x;
 }
+
+// ---- ClassWiz CW Display (native 11x13, no scaling) ----
+void glyph_cw(int x, int y, int c) {
+    if (c < 32 || c > 126) { c = 63; }
+    int base = (c - 32) * 13;
+    int r = 0;
+    while (r < 13) {
+        int bits = _cw_font[base + r];
+        int k = 0;
+        while (k < 11) {
+            pixel(x + k, y + r, (bits & 1024) != 0);
+            bits = bits + bits;
+            k = k + 1;
+        }
+        r = r + 1;
+    }
+}
+int text_cw(int x, int y, int s) {
+    int c = _rpeek(s);
+    while (c != 0) {
+        glyph_cw(x, y, c);
+        x = x + 11;
+        s = s + 1;
+        c = _rpeek(s);
+    }
+    return x;
+}
+int num_cw(int x, int y, int n) {
+    if (n == -32768) { return text_cw(x, y, "-32768"); }
+    if (n < 0) { glyph_cw(x, y, 45); x = x + 11; n = 0 - n; }
+    int d = 10000;
+    int shown = 0;
+    while (d > 0) {
+        int q = n / d;
+        n = n - q * d;
+        if (q > 0 || shown || d == 1) {
+            glyph_cw(x, y, 48 + q);
+            x = x + 11;
+            shown = 1;
+        }
+        d = d / 10;
+    }
+    return x;
+}
 void sprite(int x, int y, int w, int h, int d) {
     int bw = (w + 7) >> 3;
     int r = 0;
@@ -1121,6 +1179,18 @@ void sprite(int x, int y, int w, int h, int d) {
         r = r + 1;
     }
 }
+int memoryRead(int addr, int len) {
+    if (len == 1) { return peek(addr); }
+    if (len == 2) { return peek(addr) + (peek(addr + 1) << 8); }
+    return 0;
+}
+void memoryWrite(int addr, int len, int data) {
+    if (len == 1) { poke(addr, data); }
+    if (len == 2) { poke(addr, data); poke(addr + 1, data >> 8); }
+}
+void setStatus(int addr, int status) {
+    memoryWrite(SB2 + addr - 0xF800, 1, status != LOW);
+}
 
 int wait_key() {
     while (key() != -1) { }
@@ -1131,7 +1201,9 @@ int wait_key() {
 }
 )CWIZ";
 
-static std::string prelude_source() { return font_table_source() + "\n" + PRELUDE_SRC; }
+static std::string prelude_source() {
+    return font_table_source() + "\n" + cw_font_table_source() + "\n" + PRELUDE_SRC;
+}
 
 static std::string decl_name(const NodeP& d) { return d->sval; }
 
@@ -1150,6 +1222,10 @@ static std::vector<NodeP> select_prelude(const NodeP& user_prog, const NodeP& pr
     if (used.count("print")) {
         used.insert("text");
         used.insert("num");
+    }
+    if (used.count("print_cw")) {
+        used.insert("text_cw");
+        used.insert("num_cw");
     }
     std::set<std::string> needed;
     std::vector<std::string> stack;
@@ -1172,10 +1248,10 @@ static std::vector<NodeP> select_prelude(const NodeP& user_prog, const NodeP& pr
 
 // =================================================================== sema
 static const std::map<std::string, std::pair<int, int>> CW_BUILTINS = {
-    {"pixel", {2, 3}},   {"clear", {0, 0}},    {"key", {0, 0}},     {"delay", {1, 1}},
+    {"pixel", {2, 3}},   {"clear", {0, 0}},    {"clearRender", {0, 0}},    {"key", {0, 0}},     {"delay", {1, 1}},
     {"peek", {1, 1}},    {"poke", {2, 2}},     {"_hspan", {4, 4}},  {"key_down", {1, 1}},
     {"key_hit", {1, 1}}, {"buffered", {1, 1}}, {"flip", {0, 0}},    {"_rpeek", {1, 1}},
-    {"exit", {0, 0}}};
+    {"exit", {0, 0}},     {"render", {0, 0}}, {"renderStatus", {0, 0}}};
 static const int PRINT_MIN = 3;
 
 struct Analyzed {
@@ -1609,11 +1685,11 @@ private:
 
     std::string call(const NodeP& c) {
         const std::string& name = c->sval;
-        if (name == "print") {
+        if (name == "print" || name == "print_cw") {
             if ((int)c->list.size() < PRINT_MIN)
-                err("print(x, y, value, ...) needs at least 3 arguments", c);
+                err(name + "(x, y, value, ...) needs at least 3 arguments", c);
             for (auto& a : c->list) expr(a);
-            c->kind = "print";
+            c->kind = name;
             return "void";
         }
         auto bit = CW_BUILTINS.find(name);
@@ -1669,7 +1745,8 @@ static const std::map<std::string, std::string> CW_INV_JUMP = {
     {"==", "JNE"}, {"!=", "JEQ"}, {"<", "JGES"}, {">", "JLES"}, {"<=", "JGTS"}, {">=", "JLTS"}};
 static const std::map<std::string, std::string> CW_TRUE_JUMP = {
     {"==", "JEQ"}, {"!=", "JNE"}, {"<", "JLTS"}, {">", "JGTS"}, {"<=", "JLES"}, {">=", "JGES"}};
-static const std::map<std::string, std::string> CW_BUILTIN_LABEL = {{"_rpeek", "__rpeek"}};
+static const std::map<std::string, std::string> CW_BUILTIN_LABEL = {
+    {"_rpeek", "__rpeek"}, {"render", "__render"}, {"renderStatus", "__renderStatus"}};
 
 class Codegen {
 public:
@@ -1677,7 +1754,10 @@ public:
 
     std::string generate() {
         label("__wiz_entry");
-        emit("BL __rt_init");
+        // The firmware target has no linked CWiz runtime. Its startup code is
+        // recovered/defined by the firmware source itself; do not emit a call
+        // to the runtime's __rt_init entry point.
+        if (target.name != "fwnx") emit("BL __rt_init");
         emit("BL __init");
         if (an.has_main) emit("BL f_main");
         label("__wiz_halt");
@@ -2127,7 +2207,8 @@ private:
 
     // -- calls --------------------------------------------------------
     void ex_call(const NodeP& c) {
-        if (c->kind == "print") { ex_print(c); return; }
+        if (c->kind == "print") { ex_print(c, "text", "num"); return; }
+        if (c->kind == "print_cw") { ex_print(c, "text_cw", "num_cw"); return; }
         if (c->kind == "builtin") { ex_builtin(c); return; }
         emit_call(c->func, c->list);
     }
@@ -2198,7 +2279,7 @@ private:
         }
     }
 
-    void ex_print(const NodeP& c) {
+    void ex_print(const NodeP& c, const char* text_fn, const char* num_fn) {
         NodeP x = c->list[0], y = c->list[1];
         int px = temp_addr("print.x"), py = temp_addr("print.y");
         ex(x);
@@ -2207,7 +2288,7 @@ private:
         emit(fmt("ST ER0, %d", py));
         for (size_t i = 2; i < c->list.size(); i++) {
             NodeP v = c->list[i];
-            Func* f = an.funcs[is_text(v) ? "text" : "num"];
+            Func* f = an.funcs[is_text(v) ? text_fn : num_fn];
             std::vector<NodeP> args = {tmp_ident(px, v), tmp_ident(py, v), v};
             emit_call(f, args);
             emit(fmt("ST ER0, %d", px));

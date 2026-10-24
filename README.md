@@ -168,6 +168,7 @@ compiler/
     asm.hpp/.cpp      the nX-U8/nX-U16 assembler
     sim.hpp/.cpp      the U8 simulator (nX-U8 + nX-U16)
     font6x8.hpp       generated 6x8 font table
+    font_cw.hpp       generated ClassWiz CW Display 11x13 table
     wiz.hpp/.cpp      the Wiz front end + codegen
     cwiz.hpp/.cpp     the CWiz front end + codegen (independent)
     build.hpp/.cpp    shared pipeline: boot + body + runtime -> ROM

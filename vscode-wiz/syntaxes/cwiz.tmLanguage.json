@@ -10,13 +10,14 @@
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#builtins" },
-    { "include": "#functions" }
+    { "include": "#functions" },
+    { "include": "#variables" }
   ],
   "repository": {
     "directives": {
       "patterns": [
         {
-          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot)\\b(.*)$",
+          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot|rop|org|launcher|pad|nopad|__asm__|__hex__)\\b(.*)$",
           "captures": {
             "1": { "name": "punctuation.definition.directive.cwiz" },
             "2": { "name": "keyword.control.directive.cwiz" },
@@ -65,7 +66,7 @@
       "patterns": [
         {
           "name": "keyword.control.cwiz",
-          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto|sizeof)\\b"
+          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto|sizeof|__asm__|__hex__)\\b"
         },
         {
           "name": "storage.modifier.cwiz",
@@ -85,7 +86,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.cwiz",
-          "match": "\\b(clear|pixel|hline|vline|rect|fillrect|line|circle|disc|text|char|print|num|key|key_hit|key_down|wait_key|delay|abs|min|max|rand|peek|poke|rpeek|rpoke|_rpeek)\\b"
+          "match": "\\b(clear|pixel|line_draw|draw_line|line_print|printline|smallprint|print_small|render|render_dd|screen_del|buffer_clear|setlr|setsfr|setlr_pc|pop_xr0|pop_er0|hline|vline|rect|draw_rect|fillrect|line|circle|disc|text|char|glyph_cw|char_cw|text_cw|num_cw|print|print_cw|num|key|key_hit|key_down|wait_key|waitshift|delay|abs|min|max|rand|peek|poke|set_byte|set_word|add_word|memcpy|mem_copy|strcpy|str_copy|rpeek|rpoke|getkey|getscancode|getscancode_nodelay|getkeycode|keytable|table|_rpeek)\\b"
         },
         {
           "name": "constant.language.key.cwiz",
@@ -102,6 +103,14 @@
         {
           "name": "entity.name.function.cwiz",
           "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.cwiz",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
         }
       ]
     }

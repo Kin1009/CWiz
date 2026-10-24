@@ -201,11 +201,13 @@ uses; a leaf routine returns with `RT`, the few that call others use `PUSH LR â€
 | `__mul16` | `ER0 Ã— ER2` â†’ `ER0` (low 16 bits), shift-and-add |
 | `__div16` | signed division: quotient in `ER0`, remainder in `ER2` (signs handled separately) |
 | `__shl16` / `__sra16` | `ER0 << R2` / arithmetic `ER0 >> R2` |
-| `__pixel` | plot/clear one pixel; picks LCD or back buffer from the draw-mode cell |
-| `__clear` | clear the LCD (both planes) or the back buffer |
-| `__buffered` | set the draw mode; clears the back buffer when turned on |
-| `__flip` | copy the back buffer to the LCD |
-| `__rt_init` | zero draw mode and the `key_hit` bitmap |
+| `__pixel` | plot/clear one pixel in the shadow buffer (SB2) |
+| `__clear` | zero the shadow buffer (SB2) |
+| `__render` | copy SB2 to the LCD; on `cwii` it refreshes both bitplanes |
+| `__renderStatus` | copy only the 23-byte status-icon range from SB2 to the LCD plane(s) |
+| `__buffered` | compatibility no-op |
+| `__flip` | branch to `__render` |
+| `__rt_init` | zero the `key_hit` bitmap |
 | `__key` | scan the key matrix â†’ index or `-1` |
 | `__key_down` / `__key_hit` | held / edge-detect for one key |
 | `__delay` | busy loop |
@@ -214,14 +216,16 @@ uses; a leaf routine returns with `RT`, the few that call others use `PUSH LR â€
 
 Build-time filtering: `runtime_for()` drops lines tagged `;@1p` (1-plane) or `;@2p` (2-plane)
 depending on the target, drops `;@seg` lines when the target's `rom_seg` is 0, and adjusts the
-`;@off` VRAM row offset for `580`. The first emitted line is `_ROWS EQU <rows>`.
+`;@off` VRAM row offset for `580`. It emits `_ROWS EQU <rows>` and `_SB2 EQU <address>` first;
+`_SB2` is `0xDDD3` for `cw`/`cwapp` and `0xCA54` for `cwii`.
 
-### The two-stage pixel path
+### Shadow buffer and render
 
-`__pixel` computes the VRAM address and bit mask, then either writes both planes (`880`/`cwii`,
-direct) or one plane (`580`/`cw`). On `cwii` it loops `R12 = 0, 4` selecting the plane through
-`0F037H`; on `cw` the same loop runs once and never touches `0F037H`. This is why a single runtime
-serves both LCD types.
+All drawing primitives (`__pixel`, `__hspan`, `__clear` and everything built on them) write only
+to SB2, a plain RAM region. `render()` (`__render`) is the sole flush: it copies `0x800` bytes of
+SB2 to `0xF800`. On `cwii` the copy loops `R12 = 0, 4`, selecting plane 0 then plane 1 through
+`0F037H`; on `cw` the loop runs once and never touches `0F037H`. Because the shadow is
+monochrome, both bitplanes receive the same bits, so a set pixel is fully black.
 
 ---
 

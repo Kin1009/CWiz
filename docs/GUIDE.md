@@ -50,12 +50,14 @@ under the emulator (see [RUNNING.md](RUNNING.md)).
 def main():
     clear()
     text(8, 6, "Hello, Wiz!")
+    render()
     wait_key()
 ```
 
-- `clear()` blanks the screen.
+- `clear()` clears the off-screen shadow buffer (SB2).
 - `text(x, y, "…")` draws a string with the built-in 6×8 font. `x`, `y` are pixels; `x` ranges
   0..191, `y` ranges 0..63 (`580` shows 0..62).
+- `render()` copies SB2 to the LCD. Nothing appears on screen before `render()`.
 - `wait_key()` comes from the standard library and blocks until a key is pressed.
 
 Top-level statements run **before** `main()`, once, in order. Use them to set up globals:
@@ -105,6 +107,7 @@ only, with the escapes `\n`, `\t`, `\0`, `\\`, `\"`.
 ```python
 def main():
     text(0, 0, "line one\nline two")
+    render()
 ```
 
 ---
@@ -207,6 +210,7 @@ def greet(name_score, y=20):     # default values must be constants
 def main():
     greet(5)                     # y defaults to 20
     greet(9, 40)
+    render()
 ```
 
 - `def` is only allowed at the top level (no nested functions, no closures, no lambdas).
@@ -229,22 +233,23 @@ Recursion is supported (see [§16](#16-recursion-and-the-stack)).
 - On `880` the panel has two bitplanes (four grey levels) but Wiz's `pixel` only turns a pixel
   fully on or fully off. `580` is pure black/white.
 
-### Direct vs. buffered drawing
+### Shadow buffer and `render()`
 
-By default you draw **straight to the LCD**, which flickers while an animation clears and redraws.
+Every drawing call writes to an off-screen **shadow buffer** (SB2), never to the LCD.
+`render()` is the only call that copies SB2 to the visible LCD, so a frame appears
+atomically and never flickers while it is being cleared and redrawn:
 
 ```python
 def main():
-    buffered(1)          # redirect drawing into an off-screen back buffer (and clear it)
     while True:
         clear()
         draw_scene()
-        flip()           # copy the finished frame to the LCD, atomically
+        render()         # copy the finished frame (SB2) to the LCD (SB1)
         delay(3)
 ```
 
-`buffered(1)` switches to buffered mode and clears the buffer; `buffered(0)` goes back to direct.
-`flip()` shows the buffer. This is the standard pattern for flicker-free games.
+If you forget `render()`, nothing appears on screen. `flip()` is kept as an alias
+for `render()`; `buffered()` is accepted for old programs but does nothing.
 
 ---
 
@@ -291,6 +296,36 @@ Because text is 6 pixels wide per character, you can use the return value to con
 x = print(4, 20, "n = ", n)
 print(x, 20, "!")
 ```
+
+### Native ClassWiz CW Display font
+
+The `*_cw` family uses the calculator's native 11x13 CW Display glyphs instead of the 6x8
+bitmap.  It is not resized: the font's 10 units per LCD pixel become exactly one pixel, giving an
+11 px advance, a 12 px cap height and one descender row.  Both the 580 and the 880 use the same
+font data.
+
+```python
+text_cw(x, y, "Hello")  # one string, returns the end x
+num_cw(x, y, -1234)     # one signed decimal, returns the end x
+char_cw(x, y, 65)       # Wiz: one character by ASCII code
+print_cw(2, 2, "score ", score)   # like print(), but with the CW Display font
+```
+
+CWiz spells the one-character helper `glyph_cw` (since `char` is a type):
+
+```c
+glyph_cw(2, 2, 'A');
+text_cw(2, 2, "ClassWiz CW");
+print_cw(2, 16, "score ", 99);
+```
+
+Use 14 px between lines (`y = 2, 16, 30, 44`) to leave a one-pixel gap below the 13-row cell.
+The 2.4 KB table is emitted only when a `*_cw` function is referenced; programs that use only the
+original 6x8 API keep their old size.
+
+The current table covers printable ASCII (`32..126`), matching Wiz's byte-string model.  The
+source font also contains Vietnamese and CJK glyphs, but Wiz strings are still one byte per
+character, so those would need a separate Unicode string extension.
 
 ---
 
@@ -442,6 +477,7 @@ def exit_key():
 def main():
     clear()
     print(4, 4, "score ", score)
+    render()
 ```
 
 `cwapp` is a third header (`for cwapp`) for the fx-580VN X firmware patch.
@@ -508,6 +544,7 @@ void main() {
     clear();
     text(8, 6, "Hello, CWiz!");
     print(8, 18, "score = ", bump(5));   // print() is a compiler special form
+    render();
     while (1) {
         if (key_hit(K_EXE)) { break; }
         delay(3);
@@ -547,7 +584,9 @@ The deliberate differences from Wiz:
 - `char`, `rom`, `rom8`, `void`, … are keywords, so you cannot use them as identifiers.
 
 `print(x, y, …)` works exactly as in [§11](#11-text-numbers-and-print); a string literal or a
-`rom8` name prints as text, everything else as a number.
+`rom8` name prints as text, everything else as a number.  `print_cw(x, y, …)`,
+`text_cw(x, y, s)`, `num_cw(x, y, n)` and `glyph_cw(x, y, c)` are the native ClassWiz CW
+Display set (11x13, 1x); see [§11](#native-classwiz-cw-display-font).
 
 ### 20.1 Preprocessor directives
 
@@ -632,6 +671,7 @@ void main() {
     text(0, 0, "hi");
     num(0, 12, hist[63]);     // p[i] and *(p + i) are the same thing
     num(0, 24, *first);
+    render();
 }
 ```
 
