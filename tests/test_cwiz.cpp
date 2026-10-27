@@ -186,6 +186,30 @@ void wt::run_cwiz() {
               std::to_string(var_of(r.m, r.vars, "R")));
     }
 
+    {
+        Machine r = run("int a, b = 2, c[2] = {3, 4}; int R;"
+                        " void main() { R = a + b + c[0] + c[1]; }");
+        check("multiple declarators (a, b = 2, c[2])", var_of(r.m, r.vars, "R") == 9,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int a[] = {1, 2, 3}; int R; void main() { R = a[0] + a[2]; }");
+        check("an unsized array takes its size from the initializer",
+              var_of(r.m, r.vars, "R") == 4, std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int a[] = {1, 2, 3}; int s = 0;"
+                        " for (int k = 0, n = 3; k < n; k++) { s += a[k]; } R = s; }");
+        check("local array + for (int k = 0, n = N; ...)",
+              var_of(r.m, r.vars, "R") == 6, std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("unsigned int a = 1; static int b = 2; bool c = true; int R;"
+                        " void main() { R = a + b + c; }");
+        check("C qualifiers and bool are accepted",
+              var_of(r.m, r.vars, "R") == 4, std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
     // --------------------------------------------------------------------- functions
     {
         Machine r = run("int add(int a, int b) { return a + b; }\n"
@@ -362,6 +386,24 @@ void wt::run_cwiz() {
         check("error: missing expression", e.ok, e.msg);
         e = expect_error("void main() { int x = 1; }\nvoid main() { }", "redefinition");
         check("error: duplicate function", e.ok, e.msg);
+        e = expect_error("int a[];\nvoid main() { }", "needs a size or an initializer");
+        check("error: an unsized array needs an initializer", e.ok, e.msg);
+        e = expect_error("void x;\nvoid main() { }", "cannot have type void");
+        check("error: a void variable", e.ok, e.msg);
+        e = expect_error("void f() { return 1; }\nvoid main() { }", "cannot return a value");
+        check("error: a void function returns a value", e.ok, e.msg);
+        e = expect_error("int f() { return; }\nvoid main() { }", "must return a value");
+        check("error: a non-void function returns nothing", e.ok, e.msg);
+    }
+    {
+        bool hint_ok = false;
+        try {
+            wiz::build_cwiz("int scores;\nvoid main() { score = 1; }", "cwii");
+        } catch (const wiz::CwizError& e) {
+            hint_ok = e.code == "sema.undefined-identifier" &&
+                      std::string(e.hint).find("did you mean 'scores'") != std::string::npos;
+        }
+        check("error: undefined name has a code and a suggestion", hint_ok);
     }
 
     // --------------------------------------------------------------------- pointers

@@ -285,12 +285,17 @@ static std::vector<int> decode_str(const std::string& lit, int ln) {
             i++;
             char e = lit[i];
             auto it = ESC.find(e);
-            if (it == ESC.end()) throw WizError(fmt("unknown escape \\%c in string", e), ln);
+            if (it == ESC.end())
+                throw WizError(fmt("unknown escape \\%c in string", e), ln, 0,
+                               "Wiz strings support \\n \\t \\0 \\\\ and \\\"",
+                               "lex.bad-escape");
             out.push_back(it->second);
         } else {
             int o = (unsigned char)c;
             if (o > 126 || o < 32)
-                throw WizError("only printable ASCII is allowed in strings", ln);
+                throw WizError("only printable ASCII is allowed in strings", ln, 0,
+                               "replace the character, or use \\n / \\t / \\0 escapes",
+                               "lex.non-ascii");
             out.push_back(o);
         }
     }
@@ -323,9 +328,13 @@ static std::vector<Tok> lex(const std::string& src) {
         std::string line = rstrip(strip_comment(lines[li]));
         if (strip(line).empty()) continue;
         size_t lead = 0;
-        while (lead < line.size() && line[lead] == ' ') lead++;
-        if (line.substr(0, lead).find('\t') != std::string::npos)
-            throw WizError("tabs are not allowed for indentation, use spaces", ln);
+        while (lead < line.size() && (line[lead] == ' ' || line[lead] == '\t')) {
+            if (line[lead] == '\t')
+                throw WizError("tabs are not allowed for indentation, use spaces", ln,
+                               (int)lead + 1, "replace each tab with four spaces",
+                               "wiz.tab-indent");
+            lead++;
+        }
         int ind = (int)(line.size() - lstrip(line, " ").size());
         if (ind > indents.back()) {
             indents.push_back(ind);
@@ -334,7 +343,10 @@ static std::vector<Tok> lex(const std::string& src) {
         while (ind < indents.back()) {
             indents.pop_back();
             toks.push_back({"DEDENT", "", 0, {}, ln});
-            if (ind > indents.back()) throw WizError("inconsistent indentation", ln);
+            if (ind > indents.back())
+                throw WizError("inconsistent indentation", ln, (int)lead + 1,
+                               "align this line with the block above it; Wiz uses spaces only",
+                               "wiz.indent");
         }
         size_t pos = (size_t)ind;
         while (pos < line.size()) {
@@ -371,7 +383,10 @@ static std::vector<Tok> lex(const std::string& src) {
                     if (line[j] == '\\') j++;
                     j++;
                 }
-                if (j >= line.size()) throw WizError("unterminated string", ln);
+                if (j >= line.size())
+                    throw WizError("unterminated string", ln, (int)pos + 1,
+                                   "add a closing '\"' before the end of the line",
+                                   "lex.unterminated-string");
                 std::string lit = line.substr(pos, j - pos + 1);
                 toks.push_back({"str", "", 0, decode_str(lit, ln), ln});
                 pos = j + 1;
@@ -383,7 +398,17 @@ static std::vector<Tok> lex(const std::string& src) {
                 pos += op.size();
                 continue;
             }
-            throw WizError(fmt("unexpected character '%c'", c), ln);
+            {
+                std::string hint;
+                if (c == ';')
+                    hint = "Wiz does not use ';' at the end of statements";
+                else if (c == '{' || c == '}')
+                    hint = "Wiz uses indentation, not braces, for blocks";
+                else if ((unsigned char)c >= 0x80)
+                    hint = "source files must be UTF-8/ASCII; non-ASCII characters are not identifiers";
+                throw WizError(fmt("unexpected character '%c'", c), ln, (int)pos + 1, hint,
+                               "lex.unexpected-character");
+            }
         }
         toks.push_back({"NEWLINE", "", 0, {}, ln});
     }
@@ -422,11 +447,30 @@ private:
     bool is_kw(const std::string& s) const { return peek().kind == "kw" && peek().s == s; }
     void expect_op(const std::string& s) {
         const Tok& tk = next();
-        if (tk.kind != "op" || tk.s != s) throw WizError(fmt("expected '%s'", s.c_str()), tk.line);
+        if (tk.kind != "op" || tk.s != s) {
+            std::string hint;
+            if (s == ":")
+                hint = "add ':' at the end of the def/if/elif/else/for/while line";
+            else if (s == ")")
+                hint = "add a closing ')'";
+            else if (s == "(")
+                hint = "add '(' after the name";
+            else if (s == "]")
+                hint = "add a closing ']'";
+            throw WizError(fmt("expected '%s'", s.c_str()), tk.line, 0, hint,
+                           "syntax.expected-token");
+        }
     }
     Tok expect_kind(const std::string& k) {
         Tok tk = next();
-        if (tk.kind != k) throw WizError("expected " + to_lower(k), tk.line);
+        if (tk.kind != k) {
+            std::string hint;
+            if (k == "NEWLINE") hint = "finish the statement on this line";
+            else if (k == "INDENT") hint = "indent the block with four spaces";
+            else if (k == "name") hint = "a name may contain letters, digits and '_'";
+            throw WizError("expected " + to_lower(k), tk.line, 0, hint,
+                           "syntax.expected-token");
+        }
         return tk;
     }
 
@@ -451,7 +495,9 @@ private:
         if (tk.kind == "kw") {
             const std::string k = tk.s;
             if (k == "def") {
-                if (!top) throw WizError("def only allowed at top level", ln);
+                if (!top)
+                    throw WizError("def only allowed at top level", ln, 0,
+                                   "dedent the function to column 0", "wiz.function-scope");
                 next();
                 std::string name = expect_kind("name").s;
                 expect_op("(");
@@ -461,15 +507,22 @@ private:
                     Tok pn = expect_kind("name");
                     if (consts->count(pn.s))
                         throw WizError(fmt("'%s' is a constant, cannot be a parameter", pn.s.c_str()),
-                                       pn.line);
+                                       pn.line, 0,
+                                       "rename the parameter; constants live at top level",
+                                       "wiz.constant-parameter");
                     n->params.push_back(pn.s);
                     if (is_op("=")) {
                         next();
                         NodeP dv = expr();
-                        if (dv->k != "num") throw WizError("default value must be a constant", ln);
+                        if (dv->k != "num")
+                            throw WizError("default value must be a constant", ln, 0,
+                                           "defaults must be numbers or const values",
+                                           "wiz.default-value");
                         n->defaults.push_back(dv->num);
                     } else if (!n->defaults.empty()) {
-                        throw WizError("parameter without default after one with default", ln);
+                        throw WizError("parameter without default after one with default", ln, 0,
+                                       "move parameters with defaults to the end of the list",
+                                       "wiz.default-order");
                     }
                     if (is_op(",")) next();
                 }
@@ -497,9 +550,12 @@ private:
                 NodeP cv = expr();
                 expect_kind("NEWLINE");
                 if (cv->k != "num")
-                    throw WizError("const value must be a constant expression", ln);
+                    throw WizError("const value must be a constant expression", ln, 0,
+                               "use literals and other const values", "sema.constant");
                 if (consts->count(cn.s) && (!builtin.count(cn.s) || overridden.count(cn.s)))
-                    throw WizError(fmt("constant '%s' already defined", cn.s.c_str()), ln);
+                    throw WizError(fmt("constant '%s' already defined", cn.s.c_str()), ln, 0,
+                                   "choose another name, or remove this const declaration",
+                                   "sema.redefinition");
                 overridden.insert(cn.s);
                 (*consts)[cn.s] = cv->num;
                 return mk("pass", ln);
@@ -531,9 +587,13 @@ private:
             if (k == "for") {
                 next();
                 std::string v = expect_kind("name").s;
-                if (!is_kw("in")) throw WizError("expected 'in'", ln);
+                if (!is_kw("in"))
+                    throw WizError("expected 'in'", ln, 0,
+                                   "write 'for i in range(...):'", "syntax.expected-token");
                 next();
-                if (!is_kw("range")) throw WizError("only `for x in range(...)` is supported", ln);
+                if (!is_kw("range"))
+                    throw WizError("only `for x in range(...)` is supported", ln, 0,
+                                   "Wiz loops use range(start, stop[, step])", "wiz.range");
                 next();
                 expect_op("(");
                 std::vector<NodeP> args = {expr()};
@@ -554,11 +614,18 @@ private:
                 } else if (args.size() == 3) {
                     start = args[0];
                     stop = args[1];
-                    if (args[2]->k != "num") throw WizError("range step must be a constant", ln);
+                    if (args[2]->k != "num")
+                        throw WizError("range step must be a constant", ln, 0,
+                                       "use a number or const for the step", "wiz.range");
                     step = args[2]->num;
-                    if (step == 0) throw WizError("range step cannot be 0", ln);
+                    if (step == 0)
+                        throw WizError("range step cannot be 0", ln, 0,
+                                       "use a non-zero step, for example range(0, 10, 2)",
+                                       "wiz.range");
                 } else {
-                    throw WizError("range takes 1-3 arguments", ln);
+                    throw WizError("range takes 1-3 arguments", ln, 0,
+                                   "use range(stop), range(start, stop) or range(start, stop, step)",
+                                   "wiz.range");
                 }
                 NodeP n = mk("for", ln);
                 n->name = v;
@@ -587,7 +654,10 @@ private:
         std::vector<int> vals;
         while (!is_op("]")) {
             NodeP e = expr();
-            if (e->k != "num") throw WizError("table entries must be constants", ln);
+            if (e->k != "num")
+                throw WizError("table entries must be constants", ln, 0,
+                               "use numbers, const values and arithmetic on constants",
+                               "wiz.table-constant");
             vals.push_back((int)e->num);
             if (is_op(",")) next();
             else if (!is_op("]")) throw WizError("expected , or ]", ln);
@@ -606,7 +676,9 @@ private:
         if (kind == "rom8")
             for (int v : vals)
                 if (v < 0 || v > 255)
-                    throw WizError(fmt("rom8 entries must be 0..255, got %d", v), ln);
+                    throw WizError(fmt("rom8 entries must be 0..255, got %d", v), ln, 0,
+                                   "use a byte value, or use 'rom' for 16-bit values",
+                                   "wiz.rom8-range");
         return vals;
     }
 
@@ -711,7 +783,9 @@ private:
             }
         }
         NodeP e = expr();
-        if (e->k != "call") throw WizError("expression statement has no effect", ln);
+        if (e->k != "call")
+            throw WizError("expression statement has no effect", ln, 0,
+                           "remove it, or assign/store the result", "wiz.no-effect");
         NodeP n = mk("expr", ln);
         n->a = e;
         return n;
@@ -762,7 +836,9 @@ private:
             next();
             NodeP r = bin_level(0);
             const Tok& n = peek();
-            if (is_cmp(n)) throw WizError("chained comparisons are not supported", n.line);
+            if (is_cmp(n))
+                throw WizError("chained comparisons are not supported", n.line, 0,
+                               "write 'a < b and b < c'", "wiz.chained-comparison");
             NodeP c = mk("cmp");
             c->name = op;
             c->a = l;
@@ -872,7 +948,15 @@ private:
             expect_op(")");
             return e;
         }
-        throw WizError(fmt("unexpected token '%s'", tk.s.c_str()), tk.line);
+        {
+            std::string hint;
+            if (tk.kind == "op" && tk.s == "=")
+                hint = "use '==' for comparison, or start a new statement for assignment";
+            else if (tk.kind == "op" && (tk.s == "{" || tk.s == "}"))
+                hint = "Wiz uses indentation rather than braces";
+            throw WizError(fmt("unexpected token '%s'", tk.s.c_str()), tk.line, 0, hint,
+                           "syntax.unexpected-token");
+        }
     }
 };
 
@@ -976,18 +1060,43 @@ private:
     int alloc(const std::string& qname) {
         auto it = vars.find(qname);
         if (it == vars.end()) {
-            if (next_addr + 2 > var_limit) throw WizError("out of RAM for variables");
+            if (next_addr + 2 > var_limit)
+                throw WizError("out of RAM for variables", 0, 0,
+                               "use smaller arrays, fewer globals, or move data into rom/rom8",
+                               "memory.out-of-ram");
             vars[qname] = next_addr;
             next_addr += 2;
         }
         return vars[qname];
     }
 
+    std::vector<std::string> name_candidates() const {
+        std::vector<std::string> names;
+        for (const auto& n : globals) names.push_back(n);
+        for (const auto& n : locals) names.push_back(n);
+        for (const auto& kv : arrays) names.push_back(kv.first);
+        for (const auto& kv : roms) names.push_back(kv.first);
+        for (const auto& kv : funcs) names.push_back(kv.first);
+        for (const auto& kv : BUILTINS) names.push_back(kv.first);
+        for (const auto& kv : vars) {
+            std::string n = kv.first;
+            size_t dot = n.find('.');
+            if (dot != std::string::npos) n = n.substr(dot + 1);
+            names.push_back(n);
+        }
+        return names;
+    }
+
     int var_addr(const std::string& name, int ln) {
         if (!fn.empty() && locals.count(name) && !declared_global.count(name))
             return alloc(fn + "." + name);
         if (globals.count(name)) return alloc(name);
-        throw WizError(fmt("undefined variable '%s'", name.c_str()), ln);
+        if (find_func(name))
+            throw WizError(fmt("'%s' is a function, not a variable", name.c_str()), ln, 0,
+                           "call it with '" + name + "()'", "sema.function-as-value");
+        throw WizError(fmt("undefined variable '%s'", name.c_str()), ln, 0,
+                       did_you_mean(name, name_candidates()),
+                       "sema.undefined-identifier");
     }
 
     std::vector<NodeP> add_prelude(std::vector<NodeP> prog, std::map<std::string, long long>& consts);
@@ -1249,7 +1358,9 @@ void Compiler::func(const NodeP& d) {
                 declared_global.insert(g);
                 if (!globals.count(g))
                     throw WizError(fmt("global '%s' is never assigned at top level", g.c_str()),
-                                   s->line);
+                                   s->line, 0,
+                                   "assign it at column 0 before the function that uses 'global'",
+                                   "wiz.global-never-assigned");
             }
         }
     }
@@ -1363,12 +1474,17 @@ void Compiler::stmt(const NodeP& s) {
         emit("B " + top);
         label(end);
     } else if (k == "return") {
-        if (fn.empty()) throw WizError("return outside function", s->line);
+        if (fn.empty())
+            throw WizError("return outside function", s->line, 0,
+                           "move it inside a def block", "wiz.return-outside-function");
         if (!s->a) emit("MOV ER0, #0");
         else ex(s->a);
         emit("B f_" + fn + "__ret");
     } else if (k == "break" || k == "continue") {
-        if (loops.empty()) throw WizError(k + " outside loop", s->line);
+        if (loops.empty())
+            throw WizError(k + " outside loop", s->line, 0,
+                           "move it inside a for/while block, or remove it",
+                           "wiz.break-outside-loop");
         emit("B " + (k == "break" ? loops.back().first : loops.back().second));
     } else {
         throw WizError("internal: unknown statement " + k);
@@ -1503,7 +1619,12 @@ void Compiler::call(const NodeP& e) {
     if (bit != BUILTINS.end()) {
         int lo = bit->second.first, hi = bit->second.second;
         if (!((int)e->args.size() >= lo && (int)e->args.size() <= hi))
-            throw WizError(fmt("%s() takes %d-%d arguments", name.c_str(), lo, hi), e->line);
+            throw WizError(fmt("%s() takes %d-%d arguments, got %d", name.c_str(), lo, hi,
+                               (int)e->args.size()),
+                           e->line, 0,
+                           lo == hi ? fmt("pass exactly %d argument(s)", lo)
+                                    : fmt("pass %d-%d argument(s)", lo, hi),
+                           "sema.argument-count");
         for (auto& a : e->args) {
             ex(a);
             emit("PUSH ER0");
@@ -1512,7 +1633,7 @@ void Compiler::call(const NodeP& e) {
         if (name == "exit" && target.name != "cwapp")
             throw WizError(
                 "exit() exists only for the cwapp target (a program patched into the firmware)",
-                e->line);
+                e->line, 0, "use it only in a 'for cwapp' section", "sema.builtin-target");
         if (name == "pixel") {
             if (e->args.size() == 2) emit("MOV ER4, #1");
             emit("BL __pixel");
@@ -1524,16 +1645,21 @@ void Compiler::call(const NodeP& e) {
         return;
     }
     NodeP d = find_func(name);
-    if (!d) throw WizError(fmt("unknown function '%s'", name.c_str()), e->line);
+    if (!d)
+        throw WizError(fmt("unknown function '%s'", name.c_str()), e->line, 0,
+                       did_you_mean(name, name_candidates()), "sema.unknown-function");
     int required = (int)d->params.size() - (int)d->defaults.size();
     if (!((int)e->args.size() >= required && (int)e->args.size() <= (int)d->params.size())) {
         if (!d->defaults.empty())
             throw WizError(fmt("%s() takes %d-%d arguments, got %d", name.c_str(), required,
                                (int)d->params.size(), (int)e->args.size()),
-                           e->line);
+                           e->line, 0, fmt("pass %d-%d argument(s)", required,
+                                           (int)d->params.size()),
+                           "sema.argument-count");
         throw WizError(fmt("%s() takes %d arguments, got %d", name.c_str(), (int)d->params.size(),
                            (int)e->args.size()),
-                       e->line);
+                       e->line, 0, fmt("pass exactly %d argument(s)", (int)d->params.size()),
+                       "sema.argument-count");
     }
     std::vector<NodeP> args = e->args;
     for (size_t i = e->args.size() - required; i < d->defaults.size(); i++) {
@@ -1640,7 +1766,9 @@ std::string Compiler::compile(const std::string& src) {
         calls_in_list(kv.second->body, c);
         for (auto& cc : c) {
             if (!find_func(cc) && !BUILTINS.count(cc))
-                throw WizError(fmt("call to unknown function '%s'", cc.c_str()), kv.second->line);
+                throw WizError(fmt("call to unknown function '%s'", cc.c_str()), kv.second->line,
+                               0, did_you_mean(cc, name_candidates()),
+                               "sema.unknown-function");
         }
         std::set<std::string> g2;
         for (auto& x : c)
@@ -1663,10 +1791,13 @@ std::string Compiler::compile(const std::string& src) {
     calls_in_list(top, tc);
     for (auto& cc : tc)
         if (!find_func(cc) && !BUILTINS.count(cc))
-            throw WizError(fmt("call to unknown function '%s'", cc.c_str()));
+            throw WizError(fmt("call to unknown function '%s'", cc.c_str()), 0, 0,
+                           did_you_mean(cc, name_candidates()), "sema.unknown-function");
     for (auto& kv : funcs)
         if (kv.first == "main" && !kv.second->params.empty())
-            throw WizError("main() takes no parameters", kv.second->line);
+            throw WizError("main() takes no parameters", kv.second->line, 0,
+                           "remove the parameters, or rename the function",
+                           "sema.main-parameters");
 
     label("__wiz_entry");
     emit("BL __rt_init");
@@ -1748,7 +1879,10 @@ WizResult compile_to_asm(const std::string& src, const Target& target) {
                 std::sort(keys.begin(), keys.end());
                 throw WizError(fmt("%s is not a key on %s (keys of %s: %s)", name.c_str(),
                                    target.name.c_str(), target.name.c_str(), join(keys, " ").c_str()),
-                               (int)li + 1);
+                               (int)li + 1, 0,
+                               "use a K_* name listed above, or define it with 'const " + name +
+                                   "' if the hardware has it",
+                               "sema.unknown-key");
             }
         }
     }

@@ -6,6 +6,7 @@
 //     examples/01_hello.cwiz:7:5: warning: 'score' is declared but never read
 //         [readability/unused-variable]
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,8 @@
 #include "common.hpp"
 #include "diag.hpp"
 #include "lint.hpp"
+#include "rop.hpp"
+#include "targets.hpp"
 
 using namespace wiz;
 
@@ -51,6 +54,42 @@ std::string json_escape(const std::string& s) {
     return out;
 }
 
+bool has_compile_error(const std::vector<LintDiagnostic>& diags) {
+    for (const LintDiagnostic& d : diags)
+        if (d.rule == "compile" && d.severity == LintSeverity::Error) return true;
+    return false;
+}
+
+// Pick the section the file is written for when --target is absent/`auto`.
+// A declared section wins, then a 580/880 hint in the file name, then 580.
+// The caller retries the other target if the first one does not compile (many
+// examples have no explicit `for` section at all).
+std::string infer_target(const std::string& source, const std::string& path,
+                         const std::string& fallback = "580") {
+    std::vector<std::string> declared;
+    try {
+        declared = declared_targets(source);
+    } catch (...) {
+        return fallback;
+    }
+    // `#for 580` + `#cwapp` declares both flavours.  For linting, compile the
+    // ordinary 580 section: it has the same syntax and does not require the
+    // patching step.  A file with only `#cwapp` still selects the app target.
+    if (contains(declared, "cwapp")) {
+        if (contains(declared, "cw")) return "cw";
+        return "cwapp";
+    }
+    if (declared.size() == 1) return declared[0];
+    if (contains(declared, "cw")) return "cw";
+    if (contains(declared, "cwii")) return "cwii";
+    if (!declared.empty()) return declared[0];
+
+    const std::string name = to_lower(path_basename(path));
+    if (name.find("880") != std::string::npos) return "cwii";
+    if (name.find("580") != std::string::npos) return "cw";
+    return fallback;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -59,6 +98,7 @@ int main(int argc, char** argv) {
 
     std::vector<CliOption> opts = {
         {"--target", "target", true},
+        {"--max-line-length", "line-length", true},
         {"--strict", "strict"},
         {"--json", "json"},
         {"--rules", "rules"},
@@ -79,9 +119,11 @@ int main(int argc, char** argv) {
             "    wizlint [options] file...\n"
             "\n"
             "Options:\n"
-            "    --target NAME   target used for the compiler pass (580, 880, cwapp)\n"
+            "    --target NAME   target for the compiler pass: 580, 880, cwapp, or auto\n"
+            "                    (default: auto - inferred from #for/for sections)\n"
+            "    --max-line-length N  style/line-length limit (default: 100)\n"
             "    --strict        exit 1 on warnings as well as errors\n"
-            "    --json          machine-readable output (for editors)\n"
+            "    --json          machine-readable output (for editors), including hints\n"
             "    --rules         list the rule ids\n"
             "    --color WHEN    auto (default), always, never\n",
             stdout);
@@ -89,7 +131,7 @@ int main(int argc, char** argv) {
     }
     if (a.has("rules")) {
         for (const LintRuleInfo& rule : lint_rules())
-            std::fputs(fmt("%-32s %s\n", rule.rule, rule.description).c_str(), stdout);
+            std::fputs(fmt("%-40s %s\n", rule.rule, rule.description).c_str(), stdout);
         return 0;
     }
 
@@ -99,6 +141,17 @@ int main(int argc, char** argv) {
     const bool json = a.has("json");
 
     std::string target = a.value("target");
+    if (target.empty()) target = "auto";
+    int line_limit = 100;
+    if (a.has("line-length")) {
+        char* end = nullptr;
+        long n = std::strtol(a.value("line-length").c_str(), &end, 10);
+        if (!end || *end != '\0' || n < 20 || n > 10000) {
+            std::fprintf(stderr, "wizlint: error: --max-line-length needs a number >= 20\n");
+            return 2;
+        }
+        line_limit = (int)n;
+    }
     int errors = 0, warnings = 0, notes = 0;
     bool first_json = true;
     if (json) std::fputs("[", stdout);
@@ -121,8 +174,20 @@ int main(int argc, char** argv) {
             ++errors;
             continue;
         }
-        const std::string file_target = target.empty() ? "580" : target;
-        const std::vector<LintDiagnostic> diags = lint_source(source, path, file_target);
+        const std::string file_target =
+            (target == "auto") ? infer_target(source, path) : target;
+        std::vector<LintDiagnostic> diags =
+            lint_source(source, path, file_target, line_limit);
+        // With no explicit section a file can be target-specific for K_*
+        // constants / row counts.  If the preferred target does not compile,
+        // try the other calculator before reporting the compile error.
+        if (target == "auto" && !source_is_rop(source) && file_target != "cwapp" &&
+            file_target != "fwnx" && has_compile_error(diags)) {
+            const std::string alt = file_target == "cw" ? "cwii" : "cw";
+            std::vector<LintDiagnostic> retry =
+                lint_source(source, path, alt, line_limit);
+            if (!has_compile_error(retry)) diags = std::move(retry);
+        }
         for (const LintDiagnostic& d : diags) {
             switch (d.severity) {
                 case LintSeverity::Error: ++errors; break;
@@ -132,10 +197,15 @@ int main(int argc, char** argv) {
             if (json) {
                 if (!first_json) std::fputs(",", stdout);
                 first_json = false;
+                std::string extra;
+                if (d.end_col > 0) extra += fmt(",\"endCol\":%d", d.end_col);
+                if (!d.hint.empty()) extra += ",\"hint\":\"" + json_escape(d.hint) + "\"";
+                if (!d.code.empty()) extra += ",\"code\":\"" + json_escape(d.code) + "\"";
                 std::fputs(fmt("{\"file\":\"%s\",\"line\":%d,\"col\":%d,\"severity\":\"%s\","
-                               "\"rule\":\"%s\",\"message\":\"%s\"}",
+                               "\"rule\":\"%s\",\"message\":\"%s\"%s}",
                                json_escape(path).c_str(), d.line, d.col, sev_name(d.severity),
-                               json_escape(d.rule).c_str(), json_escape(d.message).c_str())
+                               json_escape(d.rule).c_str(), json_escape(d.message).c_str(),
+                               extra.c_str())
                                .c_str(),
                            stdout);
             } else {
@@ -147,6 +217,11 @@ int main(int argc, char** argv) {
                                d.message.c_str(), d.rule.c_str())
                                .c_str(),
                            stdout);
+                if (!d.hint.empty())
+                    std::fputs(fmt("    %s %s\n",
+                                   paint("help:", style::HINT, tty).c_str(), d.hint.c_str())
+                                   .c_str(),
+                               stdout);
             }
         }
     }

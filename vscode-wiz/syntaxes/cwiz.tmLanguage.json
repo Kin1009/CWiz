@@ -70,7 +70,7 @@
         },
         {
           "name": "storage.modifier.cwiz",
-          "match": "\\b(const|static|volatile|inline|extern|struct|enum|typedef)\\b"
+          "match": "\\b(const|static|volatile|inline|extern|register|signed|unsigned|short|long|struct|enum|typedef)\\b"
         }
       ]
     },

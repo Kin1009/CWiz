@@ -2,7 +2,7 @@
   "name": "wiz-cwiz",
   "displayName": "Wiz / CWiz",
   "description": "Syntax highlighting, snippets and a linter for the Wiz (.wz) and CWiz (.cwiz) languages of the Casio ClassWiz toolchain.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "Kin1009",
   "license": "MIT",
   "engines": {
@@ -23,7 +23,8 @@
     "onLanguage:wiz",
     "onLanguage:cwiz",
     "onCommand:wiz.build",
-    "onCommand:wiz.lint"
+    "onCommand:wiz.lint",
+    "onCommand:wiz.lint.rules"
   ],
   "main": "./src/extension.js",
   "contributes": {
@@ -79,6 +80,10 @@
         "title": "Wiz: Lint the current file"
       },
       {
+        "command": "wiz.lint.rules",
+        "title": "Wiz: Show lint rules"
+      },
+      {
         "command": "wiz.build",
         "title": "Wiz: Build the current file with wizc"
       }
@@ -86,6 +91,11 @@
     "configuration": {
       "title": "Wiz / CWiz",
       "properties": {
+        "wiz.lint.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Wiz / CWiz diagnostics."
+        },
         "wiz.lint.onSave": {
           "type": "boolean",
           "default": true,
@@ -95,6 +105,11 @@
           "type": "boolean",
           "default": true,
           "description": "Lint while typing (debounced)."
+        },
+        "wiz.lint.showHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the 'help:' fix suggestion attached to a diagnostic."
         },
         "wiz.lint.lineLength": {
           "type": "number",
@@ -119,12 +134,13 @@
         "wiz.lint.target": {
           "type": "string",
           "enum": [
+            "auto",
             "580",
             "880",
             "cwapp"
           ],
-          "default": "580",
-          "description": "Target passed to wizlint for compiler diagnostics."
+          "default": "auto",
+          "description": "Target passed to wizlint. 'auto' infers it from #for/for sections, the file name, or by trying both calculators."
         }
       }
     }

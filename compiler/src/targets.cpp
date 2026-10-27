@@ -10,13 +10,15 @@ namespace wiz {
 //   cw / cwapp: SB2 = 0xDDD3-0xE5D2, stack starts at 0xE5D3
 //   cwii:       SB2 = 0xCA54-0xE253, stack starts at 0xE254
 const Target TARGET_CWII{"cwii", "ML620909", "template_ML620909.asm", 0x9000, 0x9000,
-                         0x9000, 0xCA54, 2};
+                         0x9000, 0xCA54, 2, 0, 64, "nX-U8/100", 0, {}};
 const Target TARGET_CW{"cw", "ML620906", "template_ML620906.asm", 0xD000, 0xD000, 0xD000,
-                       0xDDD3, 1, 0, 63, "nX-U16/100", 1};
+                       0xDDD3, 1, 0, 63, "nX-U16/100", 1,
+                       {{0xD16C, 0xD175}, {0xD180, 0xD247}, {0xD31A, 0xD391},
+                        {0xD392, 0xD521}, {0xD522, 0xD5E9}, {0xD784, 0xD913}}};
 const Target TARGET_CWAPP{"cwapp", "ML620906", "template_cwapp.asm", 0xD000, 0xD000, 0xD000,
-                          0xDDD3, 1, 3, 63, "nX-U16/100", 1};
+                          0xDDD3, 1, 3, 63, "nX-U16/100", 1, {}};
 const Target TARGET_FW{"fwnx", "ML620906", "template_fwnx.asm", 0, 0, 0, 0x40000,
-                        1, 0, 63, "nX-U16/100", 0};
+                        1, 0, 63, "nX-U16/100", 0, {}};
 
 const std::string DEFAULT_TARGET = [] {
     const char* e = std::getenv("WIZ_TARGET");

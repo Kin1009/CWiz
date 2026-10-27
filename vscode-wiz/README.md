@@ -19,7 +19,9 @@ The editor linter runs in two stages:
    function parameters and scopes.
 2. **Compiler diagnostics** are added for saved files by running
    `wizlint --json`. If `wizlint` is not installed the extension silently keeps
-   the in-memory result.
+   the in-memory result. The JSON carries the compiler's error **code**
+   (`sema.undefined-identifier`, `syntax.expected-token`, …), the exact end
+   column and an optional fix **hint**.
 
 ## Linter
 
@@ -30,30 +32,53 @@ file** from the command palette to run both stages on demand.
 | Rule | What it reports |
 |------|-----------------|
 | `readability/unused-variable` | A declared variable is never read |
+| `readability/unused-parameter` | A function parameter is never used |
+| `readability/empty-block` | An `if`/`while`/`for`/`else` body is empty |
+| `readability/redundant-boolean` | `x == true`, `x != false`, … |
 | `correctness/shadowed-variable` | A local hides a global with the same name |
+| `correctness/shadowed-builtin` | A declaration hides a built-in function |
 | `correctness/unreachable-code` | A statement follows `return`/`break`/`continue` |
+| `correctness/assignment-in-condition` | `if (x = 1)` instead of `==` |
+| `correctness/self-assignment` | `x = x;` |
+| `correctness/division-by-zero` | A literal `0` divisor |
+| `correctness/constant-condition` | `if (0)` / `while (false)` |
+| `correctness/out-of-bounds` | A constant index outside a known array |
+| `correctness/missing-return` | A non-void CWiz function has no `return` |
 | `preproc/duplicate-target` | A `#for target` is listed twice |
 | `preproc/unknown-target` | `#for` names something other than `580`/`880` |
+| `preproc/unknown-directive` | A misspelled/unsupported `#directive` |
+| `preproc/unbalanced-conditional` | An unmatched `#if`/`#endif`/`#else`/`#elif` |
 | `preproc/cwapp-order` | `#cwapp` is not preceded by `#for 580` |
 | `preproc/slot-order` | `#slot` is not inside a `#cwapp` section |
 | `preproc/slot-range` | `#slot` is not a number from 1 to 12 |
 | `preproc/duplicate-slot` | A `#cwapp` section has more than one `#slot` |
-| `style/line-length` | Line longer than 100 columns |
+| `style/line-length` | Line longer than `wiz.lint.lineLength` |
 | `style/trailing-whitespace` | Trailing spaces or tabs |
 | `style/tabs` | Tab indentation (the examples use spaces) |
 | `style/todo` | A `TODO`/`FIXME`/`XXX` marker in a comment |
-| `compile` | The compiler's own first error (`wizlint --json`) |
+| `compile` | The compiler's own diagnostic (`wizlint --json`) |
+
+Diagnostics also carry a **`help:`** hint when there is an obvious fix (for
+example “use `'=='` for comparison” or “add `#endif`”). The hint appears in the
+diagnostic tooltip/related information and in `wizlint`'s terminal output.
 
 Settings:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `wiz.lint.enable` | `true` | Turn all diagnostics on/off |
 | `wiz.lint.onSave` | `true` | Lint when a document is saved |
 | `wiz.lint.onType` | `true` | Lint while typing (350 ms debounce) |
+| `wiz.lint.showHints` | `true` | Attach the `help:` hint to a diagnostic |
 | `wiz.lint.lineLength` | `100` | `style/line-length` limit |
 | `wiz.lint.useCompiler` | `true` | Run `wizlint --json` on saved files |
 | `wiz.lint.compilerPath` | `wizlint` | Path to the command-line linter |
-| `wiz.lint.target` | `580` | Target for the compiler pass (`580`, `880`, `cwapp`) |
+| `wiz.lint.target` | `auto` | `auto`, `580`, `880`, or `cwapp` |
+
+`auto` infers the target from the file's `#for` / `for` sections. For files
+without sections it uses the `580`/`880` part of the file name, and it retries
+the other calculator if the first one does not compile (for example because a
+`K_*` constant only exists on one machine).
 
 The command-line linter is the authority for compiler diagnostics:
 
@@ -101,8 +126,8 @@ from `Wenti-D/ClasswizDisplayFont`). The latter is used by `print_cw`,
 
 ```
 cd vscode-wiz
-npm run package        # writes wiz-cwiz-1.0.0.vsix
-code --install-extension wiz-cwiz-1.0.0.vsix
+npm run package        # writes wiz-cwiz-1.2.0.vsix
+code --install-extension wiz-cwiz-1.2.0.vsix
 ```
 
 The language and linter are documented in the Wiz repository:

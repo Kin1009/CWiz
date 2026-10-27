@@ -191,6 +191,75 @@ void wt::run_lint() {
         check("lint: unused Wiz variable", has(d, "readability/unused-variable"));
     }
 
+    // ------------------------------------------------------------ expanded rules
+    {
+        auto d = lint("int f(int used, int unused) { return used; }\n");
+        check("lint: unused parameter", has(d, "readability/unused-parameter"));
+    }
+    {
+        auto d = lint("int f() { int x = 1; }\n");
+        check("lint: non-void function without return", has(d, "correctness/missing-return"));
+    }
+    {
+        auto d = lint("int a[2];\nint main() { a[2] = 1; return 0; }\n");
+        check("lint: constant index outside the array", has(d, "correctness/out-of-bounds"));
+    }
+    {
+        auto d = lint("int main() { int x = 0; if (x = 1) { return 1; } return 0; }\n");
+        check("lint: assignment in a condition", has(d, "correctness/assignment-in-condition"));
+    }
+    {
+        auto d = lint("int main() { int x = 1; x = x; return x; }\n");
+        check("lint: self assignment", has(d, "correctness/self-assignment"));
+    }
+    {
+        auto d = lint("int main() { int x = 4 / 0; return x; }\n");
+        check("lint: division by zero", has(d, "correctness/division-by-zero"));
+    }
+    {
+        auto d = lint("int main() { while (false) { } return 0; }\n");
+        check("lint: empty block", has(d, "readability/empty-block"));
+        check("lint: constant false condition", has(d, "correctness/constant-condition"));
+    }
+    {
+        auto d = lint("int main() { int x = 1; if (x == true) { return 1; } return 0; }\n");
+        check("lint: redundant boolean comparison", has(d, "readability/redundant-boolean"));
+    }
+    {
+        auto d = lint("int print = 1;\nint main() { return print; }\n");
+        check("lint: declaration hides a built-in", has(d, "correctness/shadowed-builtin"));
+    }
+    {
+        auto d = lint("#wibble\nint main() { return 0; }\n");
+        check("lint: unknown directive", has(d, "preproc/unknown-directive"));
+    }
+    {
+        auto d = lint("#if 1\nint main() { return 0; }\n", "t.cwiz", "cwii");
+        check("lint: missing #endif", has(d, "preproc/unbalanced-conditional"));
+    }
+    {
+        // '#' starts a Wiz comment, so the identifier inside it is not a read.
+        auto d = lint("x = 1\n# x is used later\ndef main():\n    return x\n", "t.wz", "cwii");
+        check("lint: Wiz comments do not count as reads",
+              !has(d, "readability/unused-variable"));
+    }
+    {
+        // A TODO inside a string is not an unfinished-work marker.
+        auto d = lint("int main() { text(0, 0, \"TODO\"); return 0; }\n");
+        check("lint: TODO in a string is ignored", !has(d, "style/todo"));
+    }
+    {
+        // Block comments may span lines; identifiers inside are not declarations.
+        auto d = lint("/*\nint hidden = 1;\n*/\nint main() { return 0; }\n");
+        check("lint: multi-line block comment is ignored",
+              !has(d, "readability/unused-variable"));
+    }
+    {
+        auto d = lint("int a = 1, b = 2, c[2] = {3, 4};\n"
+                      "int main() { return a + b + c[0] + c[1]; }\n");
+        check("lint: multiple declarators are all seen", !has(d, "readability/unused-variable"));
+    }
+
     // The compiled-program font is the original Wiz 6x8 ASCII font
     // (font6x8.py, libcw.c YsFont6x8).  These are the glyph '0' bytes; a
     // regression to any other table changes them, so this documents the intent.

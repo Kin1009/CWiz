@@ -500,7 +500,20 @@ Output names default to the source name with `.bin`/`.asm`; use `-o` to keep tar
 ## 18. Common mistakes
 
 The compiler prints gcc-style diagnostics: `file:line:col: error: message`, then a source excerpt
-with a `^` caret and a `N error(s) generated.` summary.
+with a `^` caret and a `N error(s) generated.` summary.  Errors also carry a stable machine-readable
+code (`syntax.expected-token`, `sema.undefined-identifier`, `memory.out-of-ram`, …) and, where there
+is an obvious fix, a `help:` line:
+
+```console
+$ build/wizc broken.cwiz
+broken.cwiz:3:16: error: 'score' is not defined [sema.undefined-identifier]
+   3     total = score + 1;
+     |                ^
+   help: did you mean 'scores'?
+wizc: 1 error generated.
+```
+
+`wizlint --json` exposes `code`, `endCol` and `hint` for editors.
 
 | Message | Fix |
 |---------|-----|
@@ -564,13 +577,26 @@ The C-shaped bits:
   `continue`, `return`.
 - Declarations:
   ```c
-  const int W = 192;
+  const int W = 192, H = 64;
   int score = 0;                 // a global
-  int values[64];                // a RAM array
+  int a, b = 2, *p = &a;         // several declarators on one line
+  int values[64], flags[2] = {1, 0};
   rom  int table[4] = {1, 2, 3, 4};
   rom8 char msg[20] = "hello";   // a string in ROM
   rom8 char sprite[8] = "\x18\x3C\x7E\xFF\xFF\x7E\x3C\x18";
+  int inferred[] = {1, 2, 3};    // size comes from the initialiser
   ```
+  Local arrays and multi-variable `for` initialisers work too:
+  ```c
+  void main() {
+      int scratch[8] = {0};
+      for (int i = 0, n = 8; i < n; i++) { scratch[i] = i; }
+  }
+  ```
+  `unsigned`, `signed`, `short`, `long`, `static`, `volatile`, `register`,
+  `extern` and `inline` are accepted but ignored (every value is 16-bit), and
+  `bool` is an alias for `int` (`true`/`false` are keywords).  `int a[];`
+  without an initialiser and local `const` are rejected with a targeted error.
 - Expressions include the ternary `?:`, `&&`/`||`/`!`, `++`/`--` and compound assignment
   (`+=`, `<<=`, …). Character literals are written `'A'`.
 - `_ROWS` and the target's `K_*` key constants are injected as predefined constants.

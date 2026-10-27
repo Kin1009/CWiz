@@ -457,3 +457,16 @@ __hs_l1:
     ST R4, [ER10]
 __hs_next:
     RT
+
+; wipe(): clear every byte of RAM 0xD000..0xFFFF, then halt.
+; Uses registers only, so it can safely erase its own stack/return frame.
+__wipe:
+    MOV R0, #0
+    MOV R1, #0D0H
+__wipe_l:
+    MOV R2, #0
+    ST R2, [ER0]
+    ADD ER0, #1
+    BNE __wipe_l
+__wipe_h:
+    B __wipe_h

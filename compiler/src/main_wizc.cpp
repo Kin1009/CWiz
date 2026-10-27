@@ -125,7 +125,8 @@ static bool print_preprocessed(const std::string& src, const Cli& args, Diag& d)
                                                                    : CwizPos{src, e.line};
         bool rok = false;
         std::string t2 = read_text_file(p.file, &rok);
-        d.error(e.what(), p.file, p.line, e.col, rok ? source_line_at(t2, p.line) : "");
+        d.error(e.what(), p.file, p.line, e.col, rok ? source_line_at(t2, p.line) : "", e.code);
+        d.help(e.hint);
         return false;
     } catch (const std::exception& e) {
         d.error(e.what(), src);
@@ -210,7 +211,8 @@ static bool compile_one(const std::string& src, const Cli& args, Diag& d) {
                                                                    : CwizPos{src, e.line};
         bool ok = false;
         std::string text = read_text_file(p.file, &ok);
-        d.error(e.what(), p.file, p.line, e.col, ok ? source_line_at(text, p.line) : "");
+        d.error(e.what(), p.file, p.line, e.col, ok ? source_line_at(text, p.line) : "", e.code);
+        d.help(e.hint);
         return false;
     } catch (const std::exception& e) {
         d.error(e.what(), src);
