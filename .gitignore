@@ -20,6 +20,15 @@ out.bin
 # Build it locally, see emulator/BUILD-MACOS.md.
 /emulator/
 
+# ------------------------------------------------------------------ local scratch
+# Build outputs, preview bundles and scratch work stay on this machine.
+/temp/
+/preview/
+/cwiz_os/build/
+*.vsix
+*.ipa
+*.dSYM/
+
 # ------------------------------------------------------------------ misc
 __pycache__/
 *.pyc
@@ -31,8 +40,11 @@ __pycache__/
 # ------------------------------------------------------------------ local firmware research
 # ROM images and their reverse-engineering workspace stay local; these can be
 # copyrighted, large, or machine-specific and are not part of the toolchain.
+/firmware-re/
 /roms/
+/roms
 /chats.txt
+plan.md
 /disassembly.txt
 /r2_*.txt
 /build_chunk.py
