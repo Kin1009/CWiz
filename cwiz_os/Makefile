@@ -14,6 +14,7 @@ ROM := $(BUILD_DIR)/cwiz-os-standalone.rom
 SOURCE := $(PROJECT)/main.cwiz
 WIZC := $(ROOT)/build/wizc
 STOCK_ROM := $(ROOT)/emulator/models/fx-580VN X/rom.bin
+STOCK_RAM := $(ROOT)/emulator/models/fx-580VN X/ram.dmp
 EMU_BUILD := $(ROOT)/emulator/build
 EMU_APP := $(EMU_BUILD)/CasioEmuMsvc/CasioEmuMsvc.app
 
@@ -53,17 +54,11 @@ build: icons serial version compiler
 		--base-rom "$(STOCK_ROM)" \
 		--rom-out "$(ROM)" \
 		--model-template "$(PROJECT)/assets/model" \
-		--model-out "$(MODEL_DIR)"
-	"$(WIZC)" --target cw --lang cwiz -o "$(PAYLOAD)" "$(SOURCE)"
-	python3 "$(PROJECT)/tools/package_standalone.py" \
-		--program "$(PAYLOAD)" \
-		--base-rom "$(STOCK_ROM)" \
-		--rom-out "$(ROM)" \
-		--model-template "$(PROJECT)/assets/model" \
-		--model-out "$(MODEL_DIR)"
+		--model-out "$(MODEL_DIR)" \
+		--ram-template "$(STOCK_RAM)"
 	@$(MAKE) --no-print-directory verify-ram
 
-verify-ram:
+verify-ram: compiler
 	@python3 "$(PROJECT)/tools/verify_ram_layout.py" --source "$(SOURCE)" --compiler "$(WIZC)"
 
 emulator:

@@ -23,7 +23,8 @@ The Makefile resolves the compiler and emulator as sibling projects
 - `1`–`9`, `A` (`(-)`), `B` (`deg`), `C` (`x^-1`) launch apps directly.
 - Arrow keys move; at a row edge, left/right continues on the previous/next
   row. `EXE` opens the highlighted app. `AC` does not enter diagnostics.
-- Calculate and Complex are implemented; the rest show “App not installed”.
+- All twelve apps are placeholders. Calculate and Complex open a placeholder
+  screen; the other ten show “App not installed”.
 - The bottom label is drawn with `print_cw` at `y=51`; the captured separator
   row is erased.
 
@@ -90,7 +91,10 @@ page exists. Content starts at y=2 so row 0 stays free for the status bar. The
 - `main.cwiz` — boot entry and the SHIFT+7 chord.
 - `launcher/` — sprite compositor, sprite table, app shortcuts.
 - `diagnostics/` — diagnostics menu, checksum, memory/key tests.
-- `apps/` — Calculate and Complex.
-- `tools/` — serial/version generation and sprite extraction.
+- `apps/` — placeholder Calculate and Complex screens.
+- `tools/` — serial/version generation, sprite extraction, payload packaging
+  and RAM-layout verification. The boot payload must end before the stock
+  key map at `0:7B0E` (31,502 bytes); `package_standalone.py` enforces that
+  budget and reports every overlaid stock range.
 - `assets/reference-menu/` — the 16 stock menu captures.
 - `docs/` — design notes.
