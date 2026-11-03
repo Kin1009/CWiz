@@ -2,7 +2,9 @@
 #include <string>
 
 #include "font_cw.hpp"
+#include "font_cw_vn.hpp"
 #include "harness.hpp"
+#include "vn_f4.hpp"
 
 using namespace wt;
 
@@ -29,6 +31,41 @@ std::set<std::pair<int, int>> cw_ref(int x, int y, const std::string& s) {
                 if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
                     out.insert({x + (int)i * FONT_CW_W + k, y + r});
     }
+    return out;
+}
+
+std::set<std::pair<int, int>> cw_bytes_ref(int x, int y, const std::vector<unsigned char>& bytes) {
+    std::set<std::pair<int, int>> out;
+    for (size_t i = 0; i < bytes.size(); i++) {
+        if (bytes[i] == 0xF4 && i + 1 < bytes.size()) {
+            int code = bytes[++i];
+            int base = (code - FONT_CW_VN_FIRST) * FONT_CW_VN_H;
+            for (int r = 0; r < FONT_CW_VN_H; r++)
+                for (int k = 0; k < FONT_CW_VN_W; k++)
+                    if (FONT_CW_VN[base + r] & (1 << (FONT_CW_VN_W - 1 - k)))
+                        out.insert({x + k, y + r});
+            x += FONT_CW_W;
+            continue;
+        }
+        int cp = bytes[i];
+        if (cp < FONT_CW_FIRST || cp > FONT_CW_LAST) cp = '?';
+        int base = (cp - FONT_CW_FIRST) * FONT_CW_H;
+        for (int r = 0; r < FONT_CW_H; r++)
+            for (int k = 0; k < FONT_CW_W; k++)
+                if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
+                    out.insert({x + k, y + r});
+        x += FONT_CW_W;
+    }
+    return out;
+}
+
+std::set<std::pair<int, int>> cw_vn_ref(int x, int y, int code) {
+    std::set<std::pair<int, int>> out;
+    int base = (code - FONT_CW_VN_FIRST) * FONT_CW_VN_H;
+    for (int r = 0; r < FONT_CW_VN_H; r++)
+        for (int k = 0; k < FONT_CW_VN_W; k++)
+            if (FONT_CW_VN[base + r] & (1 << (FONT_CW_VN_W - 1 - k)))
+                out.insert({x + k, y + r});
     return out;
 }
 
@@ -508,5 +545,431 @@ void wt::run_cwiz() {
         check("error: indexing a non-pointer", e.ok, e.msg);
         e = expect_error("int oops = nope;\nvoid main() { }", "'nope' is not defined");
         check("error: an undefined global initialiser is reported", e.ok, e.msg);
+    }
+
+    // --------------------------------------------------------------------- switch
+    {
+        Machine r = run("int R; void main() { int x = 2; switch (x) {"
+                        " case 1: R = 10; break; case 2: R = 20; break; default: R = 30; } }");
+        check("switch dispatches to the matching case", var_of(r.m, r.vars, "R") == 20,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 7; switch (x) {"
+                        " case 1: R = 10; break; case 2: R = 20; break; default: R = 30; } }");
+        check("switch uses default when no case matches", var_of(r.m, r.vars, "R") == 30,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 1; switch (x) {"
+                        " case 1: R = R + 1; case 2: R = R + 2; break; default: R = 9; } }");
+        check("switch falls through between cases", var_of(r.m, r.vars, "R") == 3,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("const int C = 5; int R; void main() { switch (C) {"
+                        " case C: R = 55; break; default: R = 0; } }");
+        check("a case value can be a const expression", var_of(r.m, r.vars, "R") == 55,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 2; switch (x) {"
+                        " case 1: R = R + 1; default: R = R + 10;"
+                        " case 3: R = R + 100; } }");
+        check("default in the middle dispatches and falls through",
+              var_of(r.m, r.vars, "R") == 110,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int i; for (i = 0; i < 4; i++) {"
+                        " switch (i) { case 1: continue; case 2: break;"
+                        " default: R = R + 10; } R = R + 1; } }");
+        check("break leaves only the switch; continue reaches the loop", 
+              var_of(r.m, r.vars, "R") == 11 + 12,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 3; switch (x) { } R = 7; }");
+        check("an empty switch is accepted", var_of(r.m, r.vars, "R") == 7,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 1; switch (x) {"
+                        " case 1: int y = 4; R = y; break; default: R = 0; } }");
+        check("a declaration after a case label is accepted",
+              var_of(r.m, r.vars, "R") == 4,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        ErrRes e = expect_error("void main() { switch (1) { case 1: break; case 1: break; } }",
+                                "duplicate case value");
+        check("error: duplicate case value", e.ok, e.msg);
+        e = expect_error("void main() { switch (1) { default: break; default: break; } }",
+                         "duplicate 'default'");
+        check("error: duplicate default", e.ok, e.msg);
+        e = expect_error("void main() { switch (1) { case 1: continue; } }",
+                         "'continue' outside a loop");
+        check("error: continue in a switch without a loop", e.ok, e.msg);
+        e = expect_error("void main() { break; }", "'break' outside a loop or switch");
+        check("error: break outside loop and switch", e.ok, e.msg);
+        e = expect_error("void main() { case 1: break; }", "case/default only make sense");
+        check("error: case outside a switch", e.ok, e.msg);
+        e = expect_error("void main() { switch (1) { case 1: break;", "unterminated switch");
+        check("error: unterminated switch", e.ok, e.msg);
+        e = expect_error("void main() { switch (1) { int x; } }",
+                         "must follow case/default");
+        check("error: statement before the first case", e.ok, e.msg);
+    }
+
+    // --------------------------------------------------------- structs/enums/typedef
+    {
+        Machine r = run("struct P { int x; char y; }; int R; void main() {"
+                        " struct P p; p.x = 5; p.y = 3; R = p.x * 10 + p.y; }");
+        check("struct: member read/write", var_of(r.m, r.vars, "R") == 53,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("struct P { int x; int y; }; int R; void main() {"
+                        " struct P p; struct P *q = &p; q->x = 7; q->y = 8;"
+                        " R = p.x * 10 + p.y; }");
+        check("struct: pointer member access with ->", var_of(r.m, r.vars, "R") == 78,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("struct A { int x; }; struct B { struct A a; int y; };"
+                        " int R; void main() { struct B b; b.a.x = 4; b.y = 5;"
+                        " R = b.a.x * 10 + b.y; }");
+        check("struct: nested struct member", var_of(r.m, r.vars, "R") == 45,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("struct P { int x; char y; }; struct P p = {6, 2};"
+                        " int R; void main() { R = p.x * 10 + p.y; }");
+        check("struct: global braced initializer", var_of(r.m, r.vars, "R") == 62,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("struct P { int x; char y; }; int R; void main() {"
+                        " struct P p = {4, 1}; R = p.x * 10 + p.y; }");
+        check("struct: local braced initializer", var_of(r.m, r.vars, "R") == 41,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("union U { int w; char c; }; int R; void main() {"
+                        " union U u; u.w = 0x0102; R = u.c; }");
+        check("union: members share offset zero", var_of(r.m, r.vars, "R") == 2,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("enum Color { RED, GREEN = 5, BLUE }; int R;"
+                        " void main() { R = RED + GREEN + BLUE; }");
+        check("enum: implicit and explicit values", var_of(r.m, r.vars, "R") == 11,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("typedef int MyInt; typedef struct P { int x; } P;"
+                        " MyInt a = 3; P p = {4}; int R; void main() {"
+                        " R = a * 10 + p.x; }");
+        check("typedef: primitive and struct aliases", var_of(r.m, r.vars, "R") == 34,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("typedef struct { int x; } Q; Q q; int R;"
+                        " void main() { q.x = 9; R = q.x; }");
+        check("typedef: anonymous struct", var_of(r.m, r.vars, "R") == 9,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        ErrRes e = expect_error("struct P { int x; int x; }; void main() { }",
+                                "duplicate member");
+        check("error: duplicate struct member", e.ok, e.msg);
+        e = expect_error("struct P { int x; }; void main() { struct P p; p.y = 1; }",
+                         "has no member 'y'");
+        check("error: unknown struct member", e.ok, e.msg);
+        e = expect_error("struct P; void main() { struct P p; }", "incomplete type");
+        check("error: incomplete struct variable", e.ok, e.msg);
+    }
+
+    // --------------------------------------------------------- casts and local const
+    {
+        Machine r = run("int R; void main() { char c = (char)300; int x = (int)c;"
+                        " R = x; }");
+        check("cast: (char) truncates to one byte", var_of(r.m, r.vars, "R") == 44,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { const int N = 5; int a[N]; a[0] = 1;"
+                        " a[4] = 2; R = sizeof(a) + N + a[0] + a[4]; }");
+        check("local const: usable as an array size", var_of(r.m, r.vars, "R") == 18,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 7; const int K = 3;"
+                        " R = x + K; }");
+        check("local const: value usable in expressions", var_of(r.m, r.vars, "R") == 10,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
+    // --------------------------------------------------------- multi-dimensional arrays
+    {
+        Machine r = run("int a[2][3]; int R; void main() { a[0][0] = 1; a[1][2] = 5;"
+                        " R = a[0][0] * 10 + a[1][2]; }");
+        check("2D array: nested indexing", var_of(r.m, r.vars, "R") == 15,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int a[2][3]; int R; void main() {"
+                        " R = sizeof(a) * 100 + sizeof(a[0]) * 10 + sizeof(a[0][0]); }");
+        check("2D array: sizeof whole array, row and element", 
+              var_of(r.m, r.vars, "R") == 1200 + 60 + 2,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int a[2][3]; int R; void main() { int *p = a[1]; p[1] = 7;"
+                        " R = a[1][1]; }");
+        check("2D array: a row decays to a pointer", var_of(r.m, r.vars, "R") == 7,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int a[2][2] = {1, 2, 3, 4}; int R; void main() {"
+                        " R = a[1][0] * 10 + a[0][1]; }");
+        check("2D array: flat global initializer", var_of(r.m, r.vars, "R") == 32,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int a[2][2] = {1, 2, 3}; int R; void main() {"
+                        " R = a[0][0] + a[1][0] + a[1][1]; }");
+        check("2D array: missing initializers are zero", var_of(r.m, r.vars, "R") == 4,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
+    // --------------------------------------------------------------------- goto
+    {
+        Machine r = run("int R; void main() { int i = 0; again: R = R + 1; i = i + 1;"
+                        " if (i < 3) goto again; }");
+        check("goto can jump backwards", var_of(r.m, r.vars, "R") == 3,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { goto done; R = 99; done: R = R + 5; }");
+        check("goto can jump forwards", var_of(r.m, r.vars, "R") == 5,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int i; for (i = 0; i < 5; i++) {"
+                        " if (i == 2) goto out; R = R + 10; } out: R = R + 1; }");
+        check("goto leaves a nested loop", var_of(r.m, r.vars, "R") == 21,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void a() { goto done; done: R = R + 1; }"
+                        " void b() { goto done; done: R = R + 2; }"
+                        " void main() { a(); b(); }");
+        check("labels are scoped to their function", var_of(r.m, r.vars, "R") == 3,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        ErrRes e = expect_error("void main() { x: ; x: ; }", "duplicate label 'x'");
+        check("error: duplicate label", e.ok, e.msg);
+        e = expect_error("void main() { goto nowhere; }", "goto target 'nowhere' is not defined");
+        check("error: undefined goto target", e.ok, e.msg);
+        e = expect_error("void f() { here: ; }\nvoid main() { goto here; }",
+                         "goto target 'here' is not defined");
+        check("error: a label does not leak out of its function", e.ok, e.msg);
+    }
+
+    // --------------------------------------------------------------------- sizeof
+    {
+        Machine r = run("int R; int a[4]; char b[6]; void main() {"
+                        " R = sizeof(int) + sizeof(char) * 10 + sizeof(a) + sizeof(b)"
+                        " + sizeof(int*) * 100; }");
+        check("sizeof: int, char, arrays and pointers", var_of(r.m, r.vars, "R") == 226,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { int x = 1; R = sizeof x + sizeof(x + 1)"
+                        " + sizeof \"abc\" + sizeof(x); }");
+        check("sizeof: expression, parenthesised expression and string", 
+              var_of(r.m, r.vars, "R") == 2 + 2 + 4 + 2,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; int a[3]; void main() { R = sizeof(a[0]) + sizeof(char*); }");
+        check("sizeof: element and char pointer", var_of(r.m, r.vars, "R") == 2 + 2,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        ErrRes e = expect_error("void main() { int x = sizeof(void); }", "sizeof(void)");
+        check("error: sizeof(void)", e.ok, e.msg);
+    }
+
+    // --------------------------------------------------------------------- diagnostics
+    {
+        auto code_of = [](const std::string& src) {
+            try {
+                wiz::build_cwiz(src, "cwii");
+            } catch (const wiz::CwizError& e) {
+                return std::string(e.code) + "|" + e.hint + "|" + e.what();
+            }
+            return std::string("no error");
+        };
+        std::string s = code_of("int x;\nint x;\nvoid main() { }");
+        check("error: duplicate global has a code and points at the first",
+              s.find("sema.duplicate-global") != std::string::npos &&
+                  s.find("first declared at line 1") != std::string::npos,
+              s);
+        s = code_of("void main() { pint(0, 0, \"x\"); }");
+        check("error: unknown function suggests a builtin",
+              s.find("sema.unknown-function") != std::string::npos &&
+                  s.find("did you mean 'print'") != std::string::npos,
+              s);
+        s = code_of("void main() { pixel(1); }");
+        check("error: builtin arity shows the expected signature",
+              s.find("pixel(x, y, c = 1)") != std::string::npos,
+              s);
+        s = code_of("void main() { pixel(\"x\", 0); }");
+        check("error: builtin type mismatch is reported",
+              s.find("sema.argument-type") != std::string::npos &&
+                  s.find("expects int, got a string") != std::string::npos,
+              s);
+        s = code_of("void main() { } }");
+        check("error: unmatched closing brace", 
+              s.find("syntax.unmatched-brace") != std::string::npos, s);
+        s = code_of("void main() { int x = (1 + 2; }");
+        check("error: unbalanced parenthesis has its own code",
+              s.find("syntax.unbalanced-paren") != std::string::npos, s);
+        s = code_of("void main() { int a[2; }");
+        check("error: unbalanced bracket has its own code",
+              s.find("syntax.unbalanced-bracket") != std::string::npos, s);
+        s = code_of("void main() { int x = 1 }");
+        check("error: missing semicolon has its own code",
+              s.find("syntax.missing-semicolon") != std::string::npos, s);
+        s = code_of("void main() { switch (1) { case 1 ... 3: break; } }");
+        check("error: case ranges are rejected with a hint",
+              s.find("case ranges are not supported") != std::string::npos,
+              s);
+    }
+
+    // ------------------------------------------------------- ported string helpers
+    {
+        Machine r = run("int R; void main() { R = strlen(\"hello\") * 100"
+                        " + strcmp(\"abc\", \"abd\") + 1; }");
+        check("strlen()/strcmp() ported from the upstream prelude",
+              var_of(r.m, r.vars, "R") == 500,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("char buf[8]; int R; void main() { strcpy(buf, \"hi\");"
+                        " R = buf[0] * 10 + buf[1] + strlen(buf); }");
+        check("strcpy() copies a ROM string into RAM",
+              var_of(r.m, r.vars, "R") == (int)'h' * 10 + (int)'i' + 2,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { R = atoi(\"-42\") + atoi(\"17\"); }");
+        check("atoi() handles signs", var_of(r.m, r.vars, "R") == -25,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("char buf[12]; int R; void main() { itoa(buf, -255, 10);"
+                        " R = strlen(buf) * 1000 + buf[0]; }");
+        check("itoa() writes a signed decimal string", var_of(r.m, r.vars, "R") == 4045,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); pixel(5, 6);"
+                        " R = getpixel(5, 6) * 10 + getpixel(6, 6); }");
+        check("getpixel() reads the shadow buffer", var_of(r.m, r.vars, "R") == 10,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); pixel(5, 6);"
+                        " R = getpixel(5, 6); }", "cw");
+        check("getpixel() honours the 580 row offset", var_of(r.m, r.vars, "R") == 1,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); pixel(1, 1); pixel(2, 1);"
+                        " copy_rect(1, 1, 2, 1, 10, 10); clear_rect(1, 1, 1, 1);"
+                        " invert_rect(2, 1, 1, 1); R = getpixel(1, 1) * 100"
+                        " + getpixel(2, 1) * 10 + getpixel(10, 10) * 1000; }");
+        check("copy_rect()/clear_rect()/invert_rect() ported from upstream",
+              var_of(r.m, r.vars, "R") == 1000,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
+    // --------------------------------------------------------------------- Vietnamese
+    {
+        check("VN F4 map: representative codepoints",
+              vn_f4_code(0x1EA0) == 0x10 &&  // Ạ
+                  vn_f4_code(0x1EA1) == 0x65 &&  // ạ
+                  vn_f4_code(0x1EBF) == 0x3A &&  // ế
+                  vn_f4_code(0x0110) == 0x60 &&  // Đ
+                  vn_f4_code(0x0111) == 0x80 &&  // đ
+                  vn_f4_code(0x1EF4) == 0x95 &&  // Ỵ
+                  vn_f4_code('A') == 0 && vn_f4_code(0x4E00) == 0,
+              std::to_string(vn_f4_code(0x1EA0)));
+        bool all_codes = VN_F4_COUNT == 134;
+        for (int i = 0; i < VN_F4_COUNT; i++)
+            all_codes = all_codes && VN_F4_TABLE[i].code >= VN_F4_FIRST_CODE &&
+                        VN_F4_TABLE[i].code <= VN_F4_LAST_CODE;
+        check("VN F4 map: 134 columns 0x10..0x95", all_codes);
+    }
+    {
+        Machine r = run("int R; void main() { R = normalizeText(\"Tiếng Việt\"); }");
+        int addr = uvar_of(r.m, r.vars, "R");
+        std::vector<unsigned char> got;
+        for (int i = 0; i < 13; i++) got.push_back(r.m.mem[addr + i]);
+        std::vector<unsigned char> want = {'T', 'i', 0xF4, 0x3A, 'n', 'g', ' ',
+                                           'V', 'i', 0xF4, 0x3E, 't', 0};
+        check("normalizeText() converts a UTF-8 Vietnamese literal", got == want,
+              ex(got, want));
+    }
+    {
+        Machine r = run("int R; void main() { R = normalizeText(\"\\xE1\\xBA\\xA1\\xD0\\x96\"); }");
+        int addr = uvar_of(r.m, r.vars, "R");
+        std::vector<unsigned char> got;
+        for (int i = 0; i < 3; i++) got.push_back(r.m.mem[addr + i]);
+        std::vector<unsigned char> want = {0xF4, 0x65, '?'};  // ạ, then unknown Ж
+        check("normalizeText() maps UTF-8 bytes and '?' for unknown codepoints", got == want,
+              ex(got, want));
+    }
+    {
+        Machine r = run("int R; void main() { R = normalizeText(\"\\xF4\\x10\"); }");
+        int addr = uvar_of(r.m, r.vars, "R");
+        check("normalizeText() leaves an existing F4 pair unchanged",
+              r.m.mem[addr] == 0xF4 && r.m.mem[addr + 1] == 0x10 && r.m.mem[addr + 2] == 0,
+              ex((int)r.m.mem[addr], (int)r.m.mem[addr + 1]));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); R = text_cw(2, 3, \"\\xF4\\x3A\"); render(); }");
+        check("text_cw() renders an F4 pair as one Vietnamese glyph",
+              var_of(r.m, r.vars, "R") == 2 + FONT_CW_W &&
+                  lit(r.m) == cw_vn_ref(2, 3, 0x3A),
+              ex(var_of(r.m, r.vars, "R"), lit(r.m)));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); R = text_cw(2, 3, \"\\xF4\\xFF\"); render(); }");
+        check("text_cw() renders '?' for an unknown F4 column and advances once",
+              var_of(r.m, r.vars, "R") == 2 + FONT_CW_W && lit(r.m) == cw_ref(2, 3, "?"),
+              ex(var_of(r.m, r.vars, "R"), lit(r.m)));
+    }
+    {
+        Machine r = run("int R; void main() { clear(); print_cw(0, 0, normalizeText(\"ạ\"));"
+                        " R = 1; render(); }");
+        check("print_cw() lays out the normalizeText() buffer as text",
+              var_of(r.m, r.vars, "R") == 1 && lit(r.m) == cw_vn_ref(0, 0, 0x65),
+              ex(lit(r.m)));
+    }
+    {
+        Machine r = run("__normalized__ rom8 char s[13] = \"Tiếng Việt\"; int R;"
+                        " void main() { clear(); text_cw(0, 0, s); R = 1; render(); }");
+        std::vector<unsigned char> bytes = {'T', 'i', 0xF4, 0x3A, 'n', 'g', ' ',
+                                            'V', 'i', 0xF4, 0x3E, 't'};
+        auto got = lit(r.m);
+        check("__normalized__ embeds F4 bytes at compile time",
+              got == cw_bytes_ref(0, 0, bytes),
+              "got=" + std::to_string(got.size()) + " want=" +
+                  std::to_string(cw_bytes_ref(0, 0, bytes).size()));
     }
 }

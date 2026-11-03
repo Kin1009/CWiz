@@ -51,6 +51,7 @@ int main(int argc, char** argv) {
     run_guarded("test_cwiz", wt::run_cwiz);
     run_guarded("test_cpre", wt::run_cpre);
     run_guarded("test_lint", wt::run_lint);
+    run_guarded("test_conformance", wt::run_conformance);
     run_guarded("test_fuzz", wt::run_fuzz);
     run_guarded("test_rop", wt::run_rop);
 

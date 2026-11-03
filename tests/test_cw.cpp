@@ -314,7 +314,7 @@ void wt::run_cw() {
     // ------------------------------------------------- command line
     {
         namespace fs = std::filesystem;
-        fs::path tmp = fs::temp_directory_path() / ("wiztests_cw_" + std::to_string(::getpid()));
+        fs::path tmp = fs::path(wt::root_path("temp/cw_" + std::to_string(::getpid())));
         fs::create_directories(tmp);
         wiz::write_text_file((tmp / "both.wz").string(), DUAL);
         wiz::write_text_file((tmp / "plain.wz").string(), "def main():\n    pass\n");
@@ -345,6 +345,34 @@ void wt::run_cw() {
     }
 
     // ------------------------------------------------- cw screen: 63 visible rows
+    {
+        bool ok = false;
+        try {
+            wiz::build_source("def main():\n    pixel(1)\n", "cwii");
+        } catch (const wiz::CompileError& e) {
+            ok = e.code == "sema.argument-count" &&
+                 std::string(e.what()).find("expected pixel(x, y, c = 1)") != std::string::npos;
+        }
+        check("wiz: builtin arity error shows the expected signature", ok);
+    }
+
+    // String helpers and getpixel() ported from the upstream Wiz prelude.
+    {
+        Machine r = run("R = 0\ndef main():\n    global R\n"
+                        "    R = strlen(\"hello\") * 100 + strcmp(\"abc\", \"abd\") + 1\n",
+                        "cwii", 3000000);
+        check("wiz: strlen()/strcmp() ported from upstream", var_of(r.m, r.vars, "R") == 500,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    for (const char* tg : {"cwii", "cw"}) {
+        Machine r = run("R = 0\ndef main():\n    global R\n    clear()\n    pixel(5, 6)\n"
+                        "    R = getpixel(5, 6) * 10 + getpixel(6, 6)\n    render()\n",
+                        tg, 3000000);
+        check(std::string("wiz ") + tg + ": getpixel() reads the shadow buffer",
+              var_of(r.m, r.vars, "R") == 10,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
     {
         const std::string OFFSRC =
             "def main():\n    clear()\n    pixel(0, 0)\n    pixel(0, 62)\n    pixel(191, 62)\n"

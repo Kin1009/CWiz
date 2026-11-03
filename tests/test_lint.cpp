@@ -234,6 +234,55 @@ void wt::run_lint() {
         check("lint: unknown directive", has(d, "preproc/unknown-directive"));
     }
     {
+        auto d = lint("#lauchr common\nint main() { return 0; }\n");
+        const auto* hit = find_rule(d, "preproc/unknown-directive");
+        check("lint: unknown directive suggests the nearest directive",
+              hit && hit->hint.find("'#launcher'") != std::string::npos,
+              hit ? hit->hint : "no diagnostic");
+    }
+    {
+        auto d = lint("#forr 880\nint main() { return 0; }\n");
+        const auto* hit = find_rule(d, "preproc/unknown-directive");
+        check("lint: #forr suggests #for",
+              hit && hit->hint.find("'#for'") != std::string::npos,
+              hit ? hit->hint : "no diagnostic");
+    }
+    {
+        auto d = lint("int x;\nint x;\nint main() { return 0; }\n");
+        const auto* hit = find_rule(d, "compile");
+        check("lint: duplicate global reaches the compiler diagnostic",
+              hit && hit->code == "sema.duplicate-global",
+              hit ? hit->code : "no diagnostic");
+    }
+    {
+        auto d = lint("int main() { switch (1) { case 1: return 1; } return 0; }\n");
+        check("lint: switch is accepted", !has(d, "compile"),
+              has(d, "compile") ? find_rule(d, "compile")->message : "");
+    }
+    {
+        auto d = lint("#for cw\nint main() { return 0; }\n");
+        const auto* hit = find_rule(d, "preproc/noncanonical-directive");
+        check("lint: #for alias is flagged", hit && hit->hint.find("#for 580") != std::string::npos,
+              hit ? hit->hint : "no diagnostic");
+    }
+    {
+        auto d = lint("#for 580\n#cwapp\n#org E9E0\nint main() { return 0; }\n", "t.cwiz",
+                      "cwapp");
+        const auto* hit = find_rule(d, "preproc/noncanonical-directive");
+        check("lint: bare-hex #org is flagged", hit &&
+                  hit->hint.find("#org 0xE9E0") != std::string::npos,
+              hit ? hit->hint : "no diagnostic");
+    }
+    {
+        auto d = lint("rom8 int table[2];\nint main() { return 0; }\n");
+        check("lint: non-canonical rom8 element type is flagged",
+              has(d, "preproc/noncanonical-type"));
+    }
+    {
+        auto d = lint("__normalized__ int table[2] = \"a\";\nint main() { return 0; }\n");
+        check("lint: __normalized__ placement is flagged", has(d, "preproc/noncanonical-type"));
+    }
+    {
         auto d = lint("#if 1\nint main() { return 0; }\n", "t.cwiz", "cwii");
         check("lint: missing #endif", has(d, "preproc/unbalanced-conditional"));
     }

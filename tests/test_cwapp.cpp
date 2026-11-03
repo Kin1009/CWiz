@@ -79,7 +79,7 @@ void wt::run_cwapp() {
     // wizc embeds the 580 ROM and patches #cwapp programs without --cwapp.
     {
         namespace fs = std::filesystem;
-        fs::path dir = fs::temp_directory_path() / "wiz_cwapp_auto";
+        fs::path dir = fs::path(wt::root_path("temp/cwapp"));
         std::error_code ec;
         fs::create_directories(dir, ec);
         const std::string src =
@@ -118,7 +118,7 @@ void wt::run_cwapp() {
     for (const auto& rp : candidates) {
         std::error_code ec;
         if (!std::filesystem::exists(rp, ec)) continue;
-        std::string out = "/tmp/_cwapp_patched.bin";
+        std::string out = wt::root_path("temp/cwapp/_cwapp_patched.bin");
         std::string log;
         int rc = run_prog(bin_sibling("patch_menu"),
                           {rp, root_path("examples/cwapp/02_app_hello.wz"), out}, &log);

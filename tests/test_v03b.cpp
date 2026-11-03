@@ -6,7 +6,9 @@
 
 #include "font6x8.hpp"
 #include "font_cw.hpp"
+#include "font_cw_vn.hpp"
 #include "harness.hpp"
+#include "vn_f4.hpp"
 
 using namespace wt;
 
@@ -40,6 +42,41 @@ std::set<std::pair<int, int>> cw_text_ref(int x, int y, const std::string& s) {
                 if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
                     out.insert({x + (int)i * FONT_CW_W + k, y + r});
     }
+    return out;
+}
+
+std::set<std::pair<int, int>> cw_bytes_ref(int x, int y, const std::vector<unsigned char>& bytes) {
+    std::set<std::pair<int, int>> out;
+    for (size_t i = 0; i < bytes.size(); i++) {
+        if (bytes[i] == 0xF4 && i + 1 < bytes.size()) {
+            int code = bytes[++i];
+            int base = (code - FONT_CW_VN_FIRST) * FONT_CW_VN_H;
+            for (int r = 0; r < FONT_CW_VN_H; r++)
+                for (int k = 0; k < FONT_CW_VN_W; k++)
+                    if (FONT_CW_VN[base + r] & (1 << (FONT_CW_VN_W - 1 - k)))
+                        out.insert({x + k, y + r});
+            x += FONT_CW_W;
+            continue;
+        }
+        int cp = bytes[i];
+        if (cp < FONT_CW_FIRST || cp > FONT_CW_LAST) cp = '?';
+        int base = (cp - FONT_CW_FIRST) * FONT_CW_H;
+        for (int r = 0; r < FONT_CW_H; r++)
+            for (int k = 0; k < FONT_CW_W; k++)
+                if (FONT_CW[base + r] & (1 << (FONT_CW_W - 1 - k)))
+                    out.insert({x + k, y + r});
+        x += FONT_CW_W;
+    }
+    return out;
+}
+
+std::set<std::pair<int, int>> cw_vn_ref(int x, int y, int code) {
+    std::set<std::pair<int, int>> out;
+    int base = (code - FONT_CW_VN_FIRST) * FONT_CW_VN_H;
+    for (int r = 0; r < FONT_CW_VN_H; r++)
+        for (int k = 0; k < FONT_CW_VN_W; k++)
+            if (FONT_CW_VN[base + r] & (1 << (FONT_CW_VN_W - 1 - k)))
+                out.insert({x + k, y + r});
     return out;
 }
 
@@ -80,6 +117,22 @@ void wt::run_v03b() {
         for (auto& p : cw_text_ref(2 + 3 * FONT_CW_W, 3, "7")) exp.insert(p);
         check("print_cw: Wiz CW Display strings, numbers and return x",
               lit(r.m) == exp, ss(lit(r.m)));
+    }
+    {
+        std::string src = "\nrom8 vn = [0xF4, 0x3A, 0]\ndef main():\n    clear()\n"
+                          "    text_cw(2, 3, vn)\n    render()\n";
+        Machine r = build_and_run(src);
+        check("Wiz text_cw: an F4 pair renders as one Vietnamese glyph",
+              lit(r.m) == cw_vn_ref(2, 3, 0x3A), ss(lit(r.m)));
+    }
+    {
+        std::string src =
+            "\nrom8 src = [0x54, 0x69, 0xC3, 0xA1, 0x6D, 0]\ndef main():\n    clear()\n"
+            "    print_cw(0, 0, normalizeText(src))\n    render()\n";
+        Machine r = build_and_run(src);
+        std::vector<unsigned char> want = {'T', 'i', 0xF4, vn_f4_code(0x00E1), 'm'};
+        check("Wiz normalizeText + print_cw: UTF-8 'á' renders as an F4 glyph",
+              lit(r.m) == cw_bytes_ref(0, 0, want), ss(lit(r.m)));
     }
 
     // ---------------- asm hline / fillrect vs python model, both draw modes

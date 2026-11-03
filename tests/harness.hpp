@@ -201,5 +201,6 @@ void run_cpre();
 void run_cwapp();
 void run_lint();
 void run_fuzz();
+void run_conformance();
 
 }  // namespace wt

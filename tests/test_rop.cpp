@@ -456,44 +456,26 @@ void wt::run_rop() {
         "down: print(0x30, 0x31, \"DOWN\"); render(); goto loop;\n"
         "loop: delay(0x40); goto loop;\n"
         "}\n", "580");
-    // getkey() must leave the scancode value in ER0, not the slot address.
-    // Community sequence: pop er0 / slot / getkey / setlr / pop er0 / slot.
-    const size_t pe = find_seq(r_keys.bytes, word(0x12602));   // first pop er0
-    uint32_t slot_addr = 0;
-    if (pe != kNoPos && pe + 6 <= r_keys.bytes.size())
-        slot_addr = (uint32_t)r_keys.bytes[pe + 4] |
-                    ((uint32_t)r_keys.bytes[pe + 5] << 8);
-    check("rop: getkey uses an inline KI/KO slot",
-          r_keys.ok && pe != kNoPos &&
-              at(r_keys.bytes, pe + 6, 4) == word(0x2F5EA) &&
-              at(r_keys.bytes, pe + 10, 4) == word(0x09FA8) &&
-              at(r_keys.bytes, pe + 14, 4) == word(0x12602) &&
-              at(r_keys.bytes, pe + 18, 2) == seq({0x00, 0x00}) &&
-              slot_addr == 0xD730 + (uint32_t)pe + 18 &&
-              !has_seq(r_keys.bytes, seq({0x02, 0x26, 0x31, 0x30, 0x00, 0xE8})),
-          wiz::fmt("pop_er0=%zu slot=%04X expected=%04X", pe, slot_addr,
-                   0xD730 + (uint32_t)pe + 18));
-    {
-        // getkey() clears the slot first, so a released key does not leave the
-        // previous KI/KO value behind in a compiler goto loop.
-        const size_t zb = pe >= 16 ? pe - 16 : kNoPos;
-        check("rop: getkey clears the inline KI/KO slot",
-              zb != kNoPos && at(r_keys.bytes, zb, 4) == word(0x09FA8) &&
-                  at(r_keys.bytes, zb + 4, 4) == word(0x17B34) &&
-                  at(r_keys.bytes, zb + 8, 2) == seq({(uint8_t)(slot_addr & 0xFF),
-                                                      (uint8_t)(slot_addr >> 8)}) &&
-                  at(r_keys.bytes, zb + 10, 2) == seq({0x00, 0x00}) &&
-                  at(r_keys.bytes, zb + 12, 4) == word(0x139D8));
-    }
+    // Community raw pattern (trex.asm):
+    //   er0 = adr(key); getkey; pop er0; key: 00 00
+    const size_t pe = find_seq(r_keys.bytes, word(0x12602));
+    const size_t gk = find_seq(r_keys.bytes, word(0x2F5EA));
+    check("rop: getkey uses the raw 2F5EA entry and an inline slot",
+          r_keys.ok && pe != kNoPos && gk != kNoPos && gk == pe + 4 + 2 &&
+              at(r_keys.bytes, gk + 4, 4) == word(0x09FA8) &&  // setlr
+              at(r_keys.bytes, gk + 8, 4) == word(0x12602) &&  // pop er0
+              at(r_keys.bytes, gk + 12, 2) == seq({0x00, 0x00}),
+          wiz::fmt("pop_er0=%zu getkey=%zu", pe, gk));
     {
         const size_t ea = find_seq(r_keys.bytes, word(0x1EC0C));   // pop ea
         const size_t cmp = find_seq(r_keys.bytes, word(0x09C20));
         const size_t get = find_seq(r_keys.bytes, word(0x1C64A));
         const size_t sp = find_seq(r_keys.bytes, word(0x21F74));
         check("rop: keytable loads the table and runs cmp_ea on ER0",
-              pe != kNoPos && ea == pe + 20 && cmp == ea + 6 &&
-                  get == cmp + 4 && sp == get + 4,
-              wiz::fmt("getkey=%zu pop_ea=%zu cmp=%zu er6=%zu sp=%zu", pe, ea, cmp, get, sp));
+              gk != kNoPos && ea == gk + 14 && cmp == ea + 6 &&
+                  get == cmp + 4 && sp == get + 8 &&
+                  at(r_keys.bytes, get + 4, 4) == word(0x09FA8),
+              wiz::fmt("getkey=%zu pop_ea=%zu cmp=%zu er6=%zu sp=%zu", gk, ea, cmp, get, sp));
         check("rop: keytable table contains the key words",
               has_seq(r_keys.bytes, seq({0x80, 0x04})) &&
                   has_seq(r_keys.bytes, seq({0x40, 0x08})) &&
@@ -520,6 +502,55 @@ void wt::run_rop() {
               brk != kNoPos && table_addr == 0xD730 + (uint32_t)brk + 4,
               wiz::fmt("table=%04X expected=%04X", table_addr,
                        0xD730 + (uint32_t)brk + 4));
+    }
+    {
+        // T1: the FCxx -> raw conversion follows the ROM table
+        // (bank0 0x7B0E/0x83DA): FC1C=UP, FC1D=DOWN, FC1E=RIGHT, FC1F=LEFT.
+        const auto fc = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { getkey();\n"
+            "  keytable(0xFC1C, up, 0xFC1D, down, 0xFC1E, right, 0xFC1F, left,\n"
+            "           0x0000, loop);\n"
+            "up: goto loop;\ndown: goto loop;\nright: goto loop;\nleft: goto loop;\n"
+            "loop: goto loop;\n}\n", "580");
+        check("rop: FC1C/FC1D/FC1E/FC1F map to UP/DOWN/RIGHT/LEFT",
+              fc.ok && has_seq(fc.bytes, seq({0x80, 0x04})) &&
+                  has_seq(fc.bytes, seq({0x40, 0x08})) &&
+                  has_seq(fc.bytes, seq({0x80, 0x08})) &&
+                  has_seq(fc.bytes, seq({0x40, 0x04})),
+              fc.error);
+    }
+    {
+        // T2: the 580 getkey clears the inline slot at run time before reading.
+        const auto r = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { getkey(); goto done; done: goto done; }\n", "580");
+        const size_t px = find_seq(r.bytes, word(0x17B34));  // pop xr0
+        const size_t gk = find_seq(r.bytes, word(0x2F5EA));  // getkey ROP entry
+        bool clear_ok = false;
+        if (px != kNoPos && gk != kNoPos && px + 22 <= r.bytes.size()) {
+            clear_ok = at(r.bytes, px + 4, 2) == at(r.bytes, px + 16, 2) &&
+                       at(r.bytes, px + 6, 2) == seq({0x00, 0x00}) &&
+                       at(r.bytes, px + 8, 4) == word(0x139D8) &&  // [er0]=er2,rt
+                       at(r.bytes, px + 12, 4) == word(0x12602) && // pop er0
+                       gk == px + 18;
+        }
+        check("rop: 580 getkey clears the inline slot at run time", clear_ok,
+              wiz::fmt("pop_xr0=%zu getkey=%zu", px, gk));
+    }
+    {
+        // T3: getscancode uses the BL ENTER entry 1:F24E, not 1:F24C.
+        const auto sc = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { getscancode(); goto done; done: goto done; }\n", "580");
+        check("rop: getscancode uses the ROP entry 1F24E",
+              sc.ok && has_seq(sc.bytes, word(0x1F24E)) &&
+                  !has_seq(sc.bytes, word(0x1F24C)),
+              sc.error);
+        check("rop: getkey uses the ROP entry 2F5EA",
+              r_keys.ok && has_seq(r_keys.bytes, word(0x2F5EA)) &&
+                  !has_seq(r_keys.bytes, word(0x2F5E8)),
+              hex_of(r_keys.bytes));
     }
     {
         const std::string cwiz =
@@ -599,6 +630,49 @@ void wt::run_rop() {
               pop != kNoPos && rn != kNoPos && target == 0xD730 + (uint32_t)rn - 2,
               wiz::fmt("target=%04X expected=%04X", target, 0xD730 + (uint32_t)rn - 2));
     }
+    {
+        const auto dup = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { up: render(); up: render(); }\n", "580");
+        check("rop: duplicate label is an error",
+              !dup.ok && dup.error.find("duplicate label 'up'") != std::string::npos,
+              dup.error);
+    }
+    {
+        const auto undef = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { goto nowhere; render(); }\n", "580");
+        check("rop: undefined goto label is an error",
+              !undef.ok && undef.error.find("undefined label 'nowhere'") != std::string::npos,
+              undef.error);
+    }
+    {
+        const auto dupg = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int a; int a; int main() { render(); }\n", "580");
+        check("rop: duplicate global is an error",
+              !dupg.ok && dupg.error.find("duplicate global 'a'") != std::string::npos,
+              dupg.error);
+    }
+    {
+        const auto bad_dir = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#lauchr common\n"
+            "int main() { render(); }\n", "580");
+        check("rop: unknown directive is an error with a suggestion",
+              !bad_dir.ok && bad_dir.error.find("unknown ROP directive '#lauchr'") !=
+                                  std::string::npos &&
+                  bad_dir.error.find("'#launcher'") != std::string::npos,
+              bad_dir.error);
+    }
+    {
+        const auto dupf = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "void f() { render(); }\nvoid f() { render(); }\n"
+            "int main() { f(); }\n", "580");
+        check("rop: duplicate function is an error",
+              !dupf.ok && dupf.error.find("duplicate function 'f'") != std::string::npos,
+              dupf.error);
+    }
 
     // ---------------------------------------------------------------- 880
     const auto r880 = wiz::build_rop(hello_source(), "880");
@@ -674,6 +748,72 @@ void wt::run_rop() {
               rsimple.launcher[9] == 0x30,
           hex_of(rsimple.launcher));
 
+    // ---------------------------------------------------------------- guide primitives
+    {
+        const auto shift = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { waitshift(); }\n", "580");
+        const auto alias = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { wait_shift(); }\n", "580");
+        check("rop: wait_shift aliases waitshift", shift.ok && alias.ok &&
+                  shift.bytes == alias.bytes && has_seq(shift.bytes, word(0x23DDE)),
+              alias.error.empty() ? hex_of(alias.bytes) : alias.error);
+
+        const auto striped = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { wait_shift_striped(); }\n", "580");
+        check("rop: wait_shift_striped calls waitshift_striped",
+              striped.ok && has_seq(striped.bytes, word(0x23DDA)), striped.error);
+
+        const auto code = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() { getkeycode(); }\n", "580");
+        check("rop: getkeycode uses the raw key entry",
+              code.ok && has_seq(code.bytes, word(0x2F5EA)),
+              code.error.empty() ? hex_of(code.bytes) : code.error);
+    }
+    {
+        // The shape of the community guide, written in CWiz: SHIFT-gated
+        // Vietnamese text, a bitmap, a line, then arrow-key dispatch.
+        const auto guide = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+            "int main() {\n"
+            "  setlr(); setsfr(); screen_del();\n"
+            "  waitshift();\n"
+            "  print(0x30, 0x01, \"Mẹ các bạn béo   \");\n"
+            "  print(0x30, 0x11, \"CUỘC SỐNG        \");\n"
+            "  render();\n"
+            "  waitshift();\n"
+            "  bitmap(0x20, 0x20, 16, 16, \"0007000F001F003E007C60F871F03BE01FC01F800F001F803BC0F1E0E060E000\");\n"
+            "  line(0, 0, 191, 63);\n"
+            "  render();\n"
+            "  goto keys;\n"
+            "up: print(0x30, 0x21, \"UP\"); render(); goto keys;\n"
+            "down: print(0x30, 0x21, \"DOWN\"); render(); goto keys;\n"
+            "left: print(0x30, 0x21, \"LEFT\"); render(); goto keys;\n"
+            "right: print(0x30, 0x21, \"RIGHT\"); render(); goto keys;\n"
+            "keys:\n"
+            "  getkey();\n"
+            "  keytable(0x0480, up, 0x0840, down, 0x0440, left, 0x0880, right, 0x0000, keys);\n"
+            "}\n", "580");
+        check("rop: guide example builds", guide.ok, guide.error);
+        check("rop: guide example uses the display gadgets",
+              has_seq(guide.bytes, word(0x23DDE)) && has_seq(guide.bytes, word(0x09848)) &&
+                  has_seq(guide.bytes, word(0x08E62)) && has_seq(guide.bytes, word(0x0947E)),
+              hex_of(guide.bytes));
+        check("rop: guide example encodes Vietnamese as F4 glyphs",
+              has_seq(guide.bytes, seq({0xF4})), hex_of(guide.bytes));
+        check("rop: guide example keytable has the arrow scancodes",
+              has_seq(guide.bytes, seq({0x80, 0x04})) &&
+                  has_seq(guide.bytes, seq({0x40, 0x08})) &&
+                  has_seq(guide.bytes, seq({0x40, 0x04})) &&
+                  has_seq(guide.bytes, seq({0x80, 0x08})),
+              guide.log);
+        check("rop: guide example reports five keytable entries",
+              guide.log.find("keytable: 5 entries") != std::string::npos, guide.log);
+    }
+
     // ---------------------------------------------------------------- payload size
     const std::string big_text(900, 'X');
     const auto r_big = wiz::build_rop("#rop\n#for 580\n#org E9E0\n#launcher common\n#nopad\n"
@@ -692,24 +832,35 @@ void wt::run_rop() {
           r_big_long.log);
 
     // ---------------------------------------------------------------- listing
-    // The .asm listing is the low level view of the chain: address, the four
-    // raw bytes, the class and the gadget.
+    // The .asm listing is written as a source in the community ROP style:
+    // `lbl` blocks, gadget mnemonics, `hex` data and `adr(...)` references.
     check("rop: listing shows the setlr gadget",
-          rac_equivalent.log.find("E9E0  A8 9F 30 30   call     0x09FA8  setlr") !=
-              std::string::npos,
+          rac_equivalent.log.find("    setlr") != std::string::npos &&
+              rac_equivalent.log.find("# 09FA8") != std::string::npos,
           rac_equivalent.log);
-    check("rop: listing shows the pop gadget and its data",
-          rac_equivalent.log.find("E9EC  34 7B 31 30   pop      0x17B34  xr0") !=
-                  std::string::npos &&
-              rac_equivalent.log.find("E9F0  01 30 00 EA             data    01 30 00 EA") !=
-                  std::string::npos,
+    check("rop: listing shows the pop gadget and its string pointer",
+          rac_equivalent.log.find("    pop xr0") != std::string::npos &&
+              rac_equivalent.log.find("hex 01 30") != std::string::npos &&
+              rac_equivalent.log.find("eval(adr(str_1)+dist.main)") != std::string::npos,
           rac_equivalent.log);
     check("rop: listing shows the printline gadget",
-          rac_equivalent.log.find("E9F4  C8 3D 32 30   call     0x23DC8  printline") !=
-              std::string::npos,
+          rac_equivalent.log.find("    printline") != std::string::npos &&
+              rac_equivalent.log.find("# 23DC8") != std::string::npos,
           rac_equivalent.log);
-    check("rop: listing mentions the injection and the execution address",
-          rac_equivalent.log.find("injected at E9E0") != std::string::npos &&
-              rac_equivalent.log.find("executed at D730") != std::string::npos,
+    check("rop: listing declares the section and the injection address",
+          rac_equivalent.log.find("@section.main at 0xd730 backup 0xe9e0") !=
+                  std::string::npos &&
+              rac_equivalent.log.find("injected @ E9E0") != std::string::npos &&
+              rac_equivalent.log.find("executed @ D730") != std::string::npos,
           rac_equivalent.log);
+    check("rop: listing labels the function and the string pool",
+          rac_equivalent.log.find("lbl main") != std::string::npos &&
+              rac_equivalent.log.find("lbl str_1") != std::string::npos &&
+              rac_equivalent.log.find("\"HELLO ROP\"") != std::string::npos,
+          rac_equivalent.log);
+    check("rop: listing spells key table entries and targets like the sources",
+          r_keys.log.find("lbl keytable_1") != std::string::npos &&
+              r_keys.log.find("KEY_UP") != std::string::npos &&
+              r_keys.log.find("adr(up) - 2") != std::string::npos,
+          r_keys.log);
 }

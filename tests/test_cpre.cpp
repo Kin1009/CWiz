@@ -268,6 +268,33 @@ void wt::run_cpre() {
         check("an unknown directive is an error", e.ok, e.msg);
     }
     {
+        bool ok = false;
+        try {
+            wiz::preprocess_cwiz("#forr 880\nint a;", "t.cwiz", "cwii");
+        } catch (const wiz::CwizError& e) {
+            ok = e.code == "preproc.unknown-directive" &&
+                 std::string(e.hint).find("did you mean '#for'?") != std::string::npos;
+        }
+        check("an unknown directive suggests the nearest known directive", ok);
+    }
+    {
+        wiz::CwizPreprocessInfo info =
+            wiz::preprocess_cwiz_info("#for 580\n#cwapp\n#org 0x25000\nint app;\n",
+                                      "t.cwiz", "cwapp");
+        check("#org records the firmware origin and is removed from the C text",
+              info.has_org && info.org == 0x25000 && !has(info.text, "#org") &&
+                  !has(info.text, "ORG 0x25000"),
+              info.text);
+        wiz::BuildResult b =
+            wiz::build_cwiz("#for 580\n#cwapp\n#org 0x25000\nvoid main() { }\n", "cwapp",
+                            "t.cwiz");
+        check("#org no longer breaks a #cwapp build", b.cwapp && !b.rom.empty());
+    }
+    {
+        PpErr e = pp_error("#org 0x25000\nint a;", "#org is only meaningful");
+        check("#org outside #cwapp is rejected with a targeted message", e.ok, e.msg);
+    }
+    {
         PpErr e = pp_error("#define\nint a;", "#define needs a name");
         check("#define without a name is an error", e.ok, e.msg);
     }
@@ -278,7 +305,7 @@ void wt::run_cpre() {
 
     // ----------------------------------------------------------------- #include
     {
-        std::string dir = (std::filesystem::temp_directory_path() / "wizcpre").string();
+        std::string dir = wt::root_path("temp/cpre");
         std::filesystem::create_directories(dir);
         {
             std::ofstream f(dir + "/inc.cwiz");
