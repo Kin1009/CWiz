@@ -4,6 +4,10 @@ Status: implemented (layout revamp + JSON settings + live multi-session + termin
 Branch: preview
 Last updated: 2026-11-03
 
+Paths are repo-relative to the Wiz workspace unless prefixed with `$CASIOEMU`,
+the emulator checkout (default: the sibling `CasioEmuMsvc-Mac`). See
+`INDEX.md` for the convention.
+
 This document records what was built, how the pieces fit, and the verification
 loop. It also records two explicit overrides of the earlier design docs:
 
@@ -196,9 +200,9 @@ works even if resources are missing.
 Headless (no display, no screenshots of the desktop):
 
 ```
-build/.../CasioEmuMsvc --shot-startup=/Users/kin/Desktop/Wiz/temp/shots/welcome.png --frames=20
-build/.../CasioEmuMsvc --shot-shell=/Users/kin/Desktop/Wiz/temp/shots/shell.png \
-    --frames=30 "model=/Users/kin/Desktop/CasioEmuMsvc-Mac/models/fx-580VN X"
+build/.../CasioEmuMsvc --shot-startup=temp/shots/welcome.png --frames=20
+build/.../CasioEmuMsvc --shot-shell=temp/shots/shell.png \
+    --frames=30 "model=$CASIOEMU/models/fx-580VN X"
 ```
 
 The shell mode writes `<shot>.layout.txt` with region rects and automated
@@ -211,7 +215,7 @@ Functional self-check:
 ```
 CASIOEMU_SELFTEST=/path/report.txt \
 build/.../CasioEmuMsvc --shot-shell=/path/shot.png --frames=100 \
-    "model=/Users/kin/Desktop/CasioEmuMsvc-Mac/models/fx-580VN X"
+    "model=$CASIOEMU/models/fx-580VN X"
 ```
 
 It opens a second live model, runs the Wiz build (Build succeeded), focuses the
@@ -375,12 +379,12 @@ Plugin Manager, Settings, About, Documentation URL.
 
 ## 13. Preview build
 
-- Bundle: `/Users/kin/Desktop/Wiz/preview/CasioEmuMsvc.app`
-- Launch log: `/Users/kin/Desktop/Wiz/temp/logs/preview-launch.log`
-- Launch command: `CasioEmuMsvc.app/Contents/MacOS/CasioEmuMsvc "/Users/kin/Desktop/CasioEmuMsvc-Mac/models/fx-580VN X"`
+- Bundle: `preview/CasioEmuMsvc.app` (repo-relative)
+- Launch log: `temp/logs/preview-launch.log`
+- Launch command: `CasioEmuMsvc.app/Contents/MacOS/CasioEmuMsvc "$CASIOEMU/models/fx-580VN X"`
 - Last verified running instance: PID 80585 (left running for the user). It
   restores the saved sessions from `settings.json`. Log:
-  `/Users/kin/Desktop/Wiz/temp/logs/preview-launch.log`.
+  `temp/logs/preview-launch.log`.
 
 The plugin work added a deterministic shutdown hook:
 `gui_cleanup()` calls `casioemu::plugin::PluginRegistry::Instance().Shutdown()`

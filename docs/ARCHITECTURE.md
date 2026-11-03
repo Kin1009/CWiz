@@ -10,7 +10,8 @@ Read [GUIDE.md](GUIDE.md) for the two languages and [API.md](API.md) for the sur
 
 ## Pipeline
 
-The toolchain is one static library (`wizcore`) plus four thin drivers. Two independent front ends
+The toolchain is one static library (`wizcore`) plus five thin drivers
+(`wizc`, `wizrun`, `customromrun`, `patch_menu`, `wizlint`). Two independent front ends
 feed a single shared back end:
 
 ```

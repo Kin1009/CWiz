@@ -10,8 +10,9 @@ New to Wiz? Read [GUIDE.md](GUIDE.md) first.
 
 ## Command-line tools
 
-All four tools are built into `./build` by [`build.sh`](../build.sh) and share the same gcc-like
-coloured output (auto-detected TTY, `NO_COLOR`, `--color=auto|always|never`).
+The toolchain builds **five tools** into `./build`, plus the test binary and a
+corpus checker, and they share the same gcc-like coloured output (auto-detected
+TTY, `NO_COLOR`, `--color=auto|always|never`).
 
 | Tool | Usage |
 |------|-------|
@@ -19,13 +20,16 @@ coloured output (auto-detected TTY, `NO_COLOR`, `--color=auto|always|never`).
 | `wizrun`       | `wizrun [options] file` — compile and run in the simulator, print the LCD |
 | `customromrun` | `customromrun --model 580\|880 rom.bin` — run a custom ROM on a CasioEmuMsvc model |
 | `patch_menu`   | `patch_menu rom.bin app.wz out.bin` — patch a program into an fx-580VN X firmware |
-| `wiztests`     | `wiztests` — run the toolchain test suite |
+| `wizlint`      | `wizlint [--target …] [--json] file…` — lint `.wz` / `.cwiz` sources |
+| `wiztests`     | `wiztests` — run the toolchain test suite (also a CTest case) |
+| `corpus_check` | `corpus_check` — compile the CWiz corpus and write reports under `temp/corpus` |
 
-`wizc` options: `-o FILE`, `--target 580|880`, `--cwapp`, `--lang wiz|cwiz`, `-S` (listing only),
-`-E`/`--pp` (print the preprocessed/selected source), `--no-asm`, `--color[=WHEN]`, `-v`,
+`wizc` options: `-o FILE` (also `--output`), `--target 580|880`, `--cwapp`,
+`--lang wiz|cwiz`, `-S` (listing only), `-E`/`--pp` (print the
+preprocessed/selected source), `--no-asm`, `-Wall`, `--color[=WHEN]`, `-v`,
 `--version`, `-h`.
-`wizrun` options: `--target`, `--cwapp`, `--steps N`, `--keys LIST`, `--press LIST`, `--full`,
-`--color`, `-v`, `--version`, `-h`.
+`wizrun` options: `--target`, `--cwapp` (accepted; no longer needed), `--steps N`,
+`--keys LIST`, `--press LIST`, `--full`, `--color`, `-v`, `--version`, `-h`.
 Full details in [RUNNING.md](RUNNING.md).
 
 ---
@@ -57,7 +61,13 @@ languages. You cannot define a function with one of these names. Unless noted, a
 | `flip()` | 0 | — | Alias for `render()` (kept for older programs). |
 | `exit()` | 0 | — | **cwapp only.** Leave the program and restart the firmware (returns to the menu). |
 | `_hspan(x0, x1, y, c)` | 4 | — | Internal fast span fill, `x0..x1-1`. Requires `0 <= x0 < x1 <= 192`, `0 <= y < ROWS`. |
+| `ticks()` | 0 | timer count | Free-running Timer0 counter, **8 counts per millisecond**. The timer is started on the first call. |
+| `delay_ms(ms)` | 1 | — | Wait `ms` milliseconds using that timer (calibrated, unlike `delay`). Negative values return immediately. |
 | `_rpeek(addr)` | 1 | 0..255 | Internal: like `peek` but assumes the data segment of ROM tables (used on `cwapp`). |
+| `_hpeek(addr)` / `_hpoke(addr, v)` | 1 / 2 | 0..255 / — | Internal: raw byte load/store through `[ERn]` (`runtime.asm`), no segment handling. Not part of the author-facing surface. |
+
+`delay(n)` is the uncalibrated busy-wait; prefer `delay_ms` when the duration
+matters and `ticks()` when you need to poll elapsed time.
 
 `key_hit` state is kept in runtime RAM; see the [memory map](#memory-map).
 
@@ -227,7 +237,8 @@ Example: `if key_hit(K_OK): …`
 `K_NONE` is `-1` on both.
 
 > These scan codes are transcribed from existing references (`libcw.h`, etc.). They are not all
-> verified against real hardware — see the disclaimer in the [README](../README.md#status--honesty).
+> verified against real hardware — see the disclaimer in
+> [`compiler/README.md`](../compiler/README.md#status--honesty).
 
 ---
 
@@ -238,7 +249,7 @@ Variables/arrays are allocated upward from `var_base`; the shadow buffer (SB2) a
 | Region | `880` / `cwii` (ML620909) | `580` / `cw` / `cwapp` (ML620906) |
 |--------|---------------------------|-----------------------------------|
 | Program ROM | `0x0000`–`0x8FFF` | `0x0000`–`0xCFFF` |
-| Variables & arrays | `0x9000`–`0xCA53` (~14.9 KB) | `0xD000`–`0xDDD2` (~3.5 KB) |
+| Variables & arrays | `0x9000`–`0xCA53` (~14.6 KB) | `0xD000`–`0xDDD2` (~3.5 KB) |
 | Shadow buffer (SB2) | `0xCA54`–`0xE253` (0x1800) | `0xDDD3`–`0xE5D2` (0x800) |
 | `key_hit` bitmap | `0xE808`–`0xE80F` | `0xE808`–`0xE80F` |
 | Stack (grows down from `0xF000`) | `0xE254`–`0xF000` | `0xE5D3`–`0xF000` |
@@ -254,12 +265,12 @@ visible height is therefore 63 rows.
 
 ## Targets
 
-See the table in the [README](../README.md#targets). `compiler/src/targets.cpp` holds the
+See the table in [`compiler/README.md`](../compiler/README.md#targets). `compiler/src/targets.cpp` holds the
 authoritative description (`wiz::Target`, declared in `targets.hpp`):
 
 | Field | Meaning |
 |-------|---------|
-| `name` | target id (`cwii`, `cw`, `cwapp`) |
+| `name` | target id (`cwii`, `cw`, `cwapp`, `fwnx`) |
 | `chip` | chip name (`ML620909` / `ML620906`) |
 | `tmpl` | boot template file |
 | `rom_limit` | first address that is not ROM |
@@ -272,13 +283,19 @@ authoritative description (`wiz::Target`, declared in `targets.hpp`):
 | `row_off` | VRAM row of user `y = 0` (0 / 1) |
 
 `wiz::canonical(name)` maps the user-facing names and internal names onto the internal ones
-(`580`/`cw` → `cw`; `880`/`cwii` → `cwii`; `cwapp` → `cwapp`). `wiz::get_target(name)` throws for
-anything else.
+(`580`/`cw` → `cw`; `880`/`cwii` → `cwii`; `cwapp` → `cwapp`; `fwnx`/`fw` → `fwnx`).
+`wiz::get_target(name)` throws for anything else.
+
+`fwnx` is the fourth target: the full-firmware-image flavour of the ML620906 used
+by `#binary` payloads. Its allocator limits are `rom_limit` 0 / `var_limit`
+`0x40000`, so it addresses the whole 256 KB dump; it is not a bootable target
+(no runtime or init code is linked in), only a placement target for
+`--target fwnx`.
 
 ### Multi-target sources and the CLI
 
 ```
-build/wizc prog.wz [out.bin] [--target 580|880]
+build/wizc [options] prog.wz…
 ```
 
 - Without `--target`, `wizc` uses the file's only declared target if it has exactly one; else, if
@@ -298,8 +315,9 @@ build/wizc prog.wz [out.bin] [--target 580|880]
 
 ## C++ API
 
-The toolchain is a static library, `wizcore` (see `compiler/CMakeLists.txt`), plus four thin
-drivers. Every header lives in `compiler/src/` and is in `namespace wiz`.
+The toolchain is a static library, `wizcore` (see `compiler/CMakeLists.txt`), plus five thin
+drivers (`wizc`, `wizrun`, `customromrun`, `patch_menu`, `wizlint`). Every header lives in
+`compiler/src/` and is in `namespace wiz`.
 
 ### `common.hpp` — helpers and the error type
 

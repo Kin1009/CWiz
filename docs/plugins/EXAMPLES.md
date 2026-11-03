@@ -72,11 +72,18 @@ or into `<executable dir>/plugins/`. The macOS bundle also scans
 `<executable dir>/../Resources/plugins`. A portable build (`portable.flag` next to the
 executable) uses `<executable dir>/settings/Plugins` instead of Application Support.
 
-There is currently **no drag-and-drop install** and no Install button, despite the
-text in the Plugin Manager window. Copy the file and restart the app; discovery only
-happens at startup.
+There are three ways in:
 
-The first load shows the trust modal with identity, SHA-256, and every requested
+1. **Install Plugin...** in the Plugin Manager (`PluginLogWindow.cpp:32`) opens a
+   file picker, copies the package into the user folder and loads it — no restart.
+2. Copy the `.plugin` into the plugins folder yourself (the **Open Plugins
+   Folder** button reveals it) and **restart the app**: discovery runs at
+   startup. **Reload Declarative** only re-applies declarative packages that were
+   already discovered, so it will not pick up a newly copied file.
+3. Drop it into the folder before starting the app.
+
+Drag-and-drop onto the window is still not wired (`plugins/COMPONENTS.md` §9). The
+first load shows the trust modal with identity, SHA-256, and every requested
 permission; native packages also show the native-code warning.
 
 - **Always Allow** writes a trust record keyed by the manifest `id`. The record stores

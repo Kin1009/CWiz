@@ -1,7 +1,7 @@
 # Shell fixes (legacy plan 10.1–10.5, 3.1)
 
-Batch implemented against the CasioEmuMsvc preview tree at
-`/private/var/folders/5z/hwddh1v15pv2dnppsz9xqthc0000gn/T/opencode/CasioEmuMsvc-Mac`.
+Batch implemented against the CasioEmuMsvc preview tree (the sibling
+`CasioEmuMsvc-Mac` checkout; `$CASIOEMU` in `INDEX.md`).
 The Wiz compiler, `third_party/wiz` and `Gui/WizToolchain.cpp` were left to the
 agent that owns them.
 

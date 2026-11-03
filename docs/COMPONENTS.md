@@ -385,13 +385,14 @@ patch a ROM slot, and compile/inject ROP payloads.
 - Build hooks belong in `wiz::build_*`; the window should stay a thin adapter.
 
 **Known issues.**
-- Item 10.6: editor uses `TextEditor::LanguageDefinition::CPlusPlus()` (`:241`), so no Wiz/CWiz
+- Item 10.6: editor uses `TextEditor::LanguageDefinition::CPlusPlus()` (`:245`), so no Wiz/CWiz
   highlighting.
 - 1.1/1.2/1.4: no autocomplete, doc snippets, gutter or command palette.
 - 1.5: the header shows the chosen target, not a target parsed from `#for`/`#cwapp`.
 - 1.6: only dark/light palette swap (`RefreshEditorPalette`, `:1044`); no font-token sync.
-- The ROP UI is split between `Wiz Compiler` (target `cwrop`/`cwiirop`) and `Injection`
-  (`Rop/RopCompilerUI.cpp`); 3.2–3.3 want one panel, and `Gui/Injector.cpp` is still titled `Rop`.
+- The ROP UI is split between `Wiz Compiler` (source/target selection, no separate ROP target —
+  the backend is chosen by `#rop`) and `Injection` (`Rop/RopCompilerUI.cpp`); 3.2–3.3 want one
+  panel, and `Gui/Injector.cpp` is still titled `Rop`.
 - `third_party/wiz` is a copy of the Wiz `compiler/` tree; it must be refreshed manually
   (`docs/WIZ-TOOLCHAIN.md`).
 
@@ -417,39 +418,38 @@ to native plugins.
 **Entry points and data flow.**
 - `LoadPlugins()` (`Plugin/PluginMan.cpp`, Apple branch) → `PluginRegistry::Initialize()`.
 - Discovery order: user `<SettingsDir>/Plugins`, `<exe>/plugins`, `<exe>/../Resources/plugins`
-  (`PluginRegistry.cpp:118-134`). Portable mode uses `<exe>/settings` when `portable.flag` exists.
-  `PLUGIN_SPEC.md` §8 still lists different paths; the code is authoritative.
+  (`PluginRegistry.cpp:96-145`). Portable mode uses `<exe>/settings` when `portable.flag` exists.
+  `PLUGIN_SPEC.md` §8 documents the same order.
 - Package → manifest validation → SHA-256 → cache directory → trust record
   (`plugin-trust.json`) → load.
 - Declarative: `LoadDeclarative()` reads `entry_point`; themes go through
-  `ApplyThemeDocument()`. `inject` only checks `schema`/`payloads`; `ui_revamp` is validated and
-  stored. Neither produces a runtime effect yet.
-- Native: `LoadNative()` `dlopen`s `nativeEntry` and calls `fPluginLoad(g_pluginapi)`.
-- Manager: Installed/Developer tabs, permissions, state, enable/disable/review/remove/reveal.
-  There is no Install action; `InstallFromFile` has no call site and drag-and-drop is not wired.
+  `ApplyThemeDocument()`, `ui_revamp` through `PluginHostGui::ApplyShellLayout()`, and `inject`
+  documents register with `PluginPayloads` for the Payload view.
+- Native: `LoadNative()` `dlopen`s `nativeEntry`, calls `fPluginLoad(g_pluginapi)` and the ABI
+  handshake; unload calls `fPluginUnload`.
+- Manager: Installed/Developer tabs, permissions, state, enable/disable/review/remove/reveal and
+  **Install Plugin...** (`InstallFromDialog` → `InstallFromFile`). Drag-and-drop is not wired.
 
 **Extension points.**
 - Add a declarative type in `PluginManifest.cpp` and a handler in `LoadDeclarative`.
 - Add a host interface in `PluginApi.h` and implement it in `PluginApi_Impl.cpp`; new capabilities
   are additive via `QueryInterface` (contract in `PLUGIN_SPEC.md`).
 - Add a native example under `examples/plugins/` and a package rule test.
-- Permission checks do not exist at the operation sites; adding one means changing
-  `PluginApi_Impl.cpp`, not only the manifest.
+- Permission checks live in the guarded facades in `PluginApi_Impl.cpp`
+  (`PlatformHostGuard`, `EmulatorGuard`, `MmuGuard`, `ChipsetGuard`, `HooksGuard`, …), each calling
+  `Allow(capability, api)`; a new host method needs a guard, not only a manifest permission.
 
 **Known issues (short list; details in the plugin docs).**
-- Permissions are parsed/displayed but **never enforced**.
-- `inject` and declarative `ui_revamp` report `Loaded` without applying anything.
-- No hot reload watcher, no Unload action, `PluginRegistry::Shutdown()` has no call site, and
-  `fPluginUnload` is never called. `fPluginBuildId` is never looked up; `RegisterPlugin`'s return
-  value is ignored; `IPluginShell` does not exist.
-- API version is inconsistent (manifest schema 1, host reports 2, `PluginApi.h` comment says 1);
-  `api_version` is only range-checked.
-- The SDK `UIWindow` differs from `Gui/Ui.hpp` (extra bool and virtual in the host); avoid host
-  window names for plugin windows.
-- The checked-in example dylibs are `x86_64`-only; the app is universal.
-- The startup font rebuild can visually override a plugin theme while the plugin stays `Loaded`.
-- Trust is keyed by id; version is stored but not compared; no `trusted_at`.
-- Extraction has traversal/symlink guards but no size/ratio limit and no hard-link check.
+- `IPluginShell` (full-shell native takeover) does not exist; declarative `ui_revamp` is the only
+  layout mechanism.
+- No file watcher: a changed package needs **Reload Declarative** or a restart. Native plugins can
+  be unloaded/reloaded, but libraries with registered hooks are retained by design.
+- `RegisterPlugin`'s return value is ignored — it cannot veto a load.
+- Drag-and-drop install is not wired (the Install button is).
+- The startup font rebuild can visually override a plugin theme while the plugin stays `Loaded`
+  (recorded 2026-11-02; not re-verified).
+- Trust compares SHA-256 and the permission set; the manifest **version is stored but not
+  compared**.
 - Native plugins run in-process; there is no sandbox (documented policy, not a bug).
 
 Author-facing details are deliberately **not duplicated here**. See

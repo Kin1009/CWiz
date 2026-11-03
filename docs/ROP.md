@@ -157,7 +157,7 @@ state (TODO, do not change without hardware evidence).
 Tables use the raw KI/KO words: `up 0x0480`, `down 0x0840`,
 `left 0x0440`, `right 0x0880`. The matching FCxx IDs are `FC1C=up`,
 `FC1D=down`, `FC1E=right`, `FC1F=left`; the old ROP notes had this
-transposed (see `docs/rop-keymap.md`).
+transposed (see [`firmware-re/fx580/docs/rop-keymap.md`](../firmware-re/fx580/docs/rop-keymap.md)).
 
 Caveat: the `er6 = [ea]` step is `0x1C64A`, which also writes
 `ER14, R13..R6` to `D000..D009` and clobbers `R6..R13`/`ER14`. Do not keep
@@ -285,8 +285,12 @@ numbers and the compiler notes follow the listing after `# ---- notes ----`.
 CWiz ROP syntax includes `int` globals, labels, `goto`, `asm { "gadget" }`,
 and the supported API calls. Wiz ROP syntax supports indentation-based function
 definitions, labels, and calls. Dynamic `if`/`while` and range loops are
-diagnosed instead of silently emitted as unconditional flow. Addresses use
-`[HEX]` (and `0xHEX` for plain numbers).
+diagnosed instead of silently emitted as unconditional flow. Addresses are
+written `0x…` (`#org 0xE9E0`). Bare hex (`#org E9E0`) and bracket forms
+(`#org [E9E0]`) are still accepted so older community sources keep building, but
+they are compatibility aliases — new payloads must use `0x`. See
+[DIRECTIVES.md](DIRECTIVES.md) for the shared number grammar and the spellings
+`wizlint` currently detects.
 
 Builtins are mapped to the gadget database (580 and 880):
 

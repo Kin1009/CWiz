@@ -42,7 +42,7 @@ reproducible command; **Partial** = implemented but with a documented host limit
   deployment-target linker warnings from bundled SDL/discord-rpc).
 - `examples/plugins/*/build.sh` + `lipo -info`:
   `tool_clock.dylib` and `tab_notes.dylib` are `x86_64 arm64`.
-- Test scratch: `CASIOEMU_PLUGIN_TEST_ROOT=/Users/kin/Desktop/Wiz/temp/plugin-tests`
+- Test scratch: `CASIOEMU_PLUGIN_TEST_ROOT=<workspace>/temp/plugin-tests`
   (set by CTest); the tests remove their run directory on success.
 
 ## Build/test commands

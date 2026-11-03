@@ -201,9 +201,12 @@ codes following this scheme.
 | `syntax.unbalanced-paren` | `;`/`}`/EOF while looking for `)` |
 | `syntax.unexpected-token` | missing expression, `case` used in an expression |
 | `syntax.unmatched-brace` | extra `}` at file scope |
-| `syntax.unsupported-goto` | `goto` (not implemented) |
 | `syntax.unterminated-block` | block opened at line N never closed |
 | `syntax.unterminated-switch` | switch body never closed |
+
+`goto` is implemented (function-scoped labels, forward and backward jumps;
+`compiler/src/cwiz.cpp:1418`, covered by `tests/test_cwiz.cpp`). The old
+`syntax.unsupported-goto` code no longer exists.
 
 ### Semantics (`sema.*`)
 
@@ -352,7 +355,7 @@ Linter rules are a separate namespace (`readability/*`, `correctness/*`,
 
 | Test file | Covers |
 |---|---|
-| `tests/test_cwiz.cpp` | CWiz expressions, control flow (including new `switch`/`sizeof`), pointers, arrays, ROM tables, strings, fonts, Vietnamese text, new diagnostics and suggestions |
+| `tests/test_cwiz.cpp` | CWiz expressions, control flow (`switch`/`sizeof`/`goto`), pointers, arrays, ROM tables, strings, fonts, Vietnamese text, diagnostics and suggestions |
 | `tests/test_cpre.cpp` | `#define`, `#if`, `#include`, `#for`, `#cwapp`, `#slot`, line preservation |
 | `tests/test_lint.cpp` | Compiler errors surfaced as `compile`, style rules, directive suggestions, switch acceptance |
 | `tests/test_cw.cpp` | Wiz targets/sections, boot/runtime filtering, `getpixel`/string helpers |
@@ -365,7 +368,7 @@ Linter rules are a separate namespace (`readability/*`, `correctness/*`,
 Run:
 
 ```sh
-cd /Users/kin/Desktop/Wiz
+cd <repo root>          # the directory containing build.sh
 cmake --build build --target wizc wiztests -- -j$(sysctl -n hw.logicalcpu)
 ./build/wiztests
 ```

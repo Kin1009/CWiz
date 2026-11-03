@@ -34,8 +34,12 @@ build/wizc           the Wiz / CWiz compiler driver
 build/wizrun         build + run a program in the simulator
 build/customromrun   run a ROM image on a CasioEmuMsvc model
 build/patch_menu     patch a program into an fx-580VN X firmware dump
+build/wizlint        lint .wz / .cwiz sources (gcc-style or --json)
 build/wiztests       the toolchain test suite
 ```
+
+`corpus_check` is also built when the corpus sources are present; it compiles them and writes
+reports under `temp/corpus` (see `compiler/CMakeLists.txt`).
 
 You can also drive CMake directly:
 
@@ -57,13 +61,13 @@ overrides). `wizc` writes a ROM image and, unless `--no-asm`, an assembly listin
 source:
 
 ```console
-$ build/wizc examples/01_hello.wz
-CC examples/01_hello.wz -> examples/01_hello.bin
-    [880 ML620909 nX-U8/100] 14 variables, 2564 bytes ROM
+$ build/wizc examples/hello/01_hello.wz
+CC examples/hello/01_hello.wz -> examples/hello/01_hello.bin
+    [880 ML620909 nX-U8/100] 13 variables, 2812 bytes ROM
 ```
 
-- `examples/01_hello.bin` — the ROM image.
-- `examples/01_hello.asm` — the full assembly listing (boot template + your code + runtime),
+- `examples/hello/01_hello.bin` — the ROM image.
+- `examples/hello/01_hello.asm` — the full assembly listing (boot template + your code + runtime),
   useful for debugging.
 
 The detail line reports the target, the number of **variables** (2 bytes each) and the number of
@@ -95,12 +99,22 @@ the target sections are picked. `-E` (or `--pp`) stops right after that step and
 that the parser would see, like `gcc -E`:
 
 ```console
-$ build/wizc -E examples/cwiz/07_preproc.cwiz | head
+$ build/wizc -E examples/cwapp/01_cwapp.cwiz | head
+// cwapp/01_cwapp.cwiz — full patched ROM build (580 only).
+// #for 580 selects the target; #cwapp switches to the app-patch flavour.
+
+
+
+
+// Shadow mechanism: draw to SB2, call render() to flush SB2 -> SB1 (F800)
+void main() {
+    clear();
 ```
 
-The output is line-preserving — a directive line becomes an empty line — so diagnostics still point
-at the line you wrote, including through `#include`d files. For a Wiz source (no directives),
-`-E` prints the file with just the target's `for <target>` sections selected.
+The three blank lines are the `#for 580`, `#cwapp` and `#org 0x25000` directives: the output is
+line-preserving — a directive line becomes an empty line — so diagnostics still point at the line
+you wrote, including through `#include`d files. For a Wiz source (no directives), `-E` prints the
+file with just the target's `for <target>` sections selected.
 
 ### Multi-target builds
 
@@ -156,11 +170,15 @@ build/wizrun [options] file.bin [580|880]
 `wizrun` loads a compiled image and runs it on the bundled simulator, printing the LCD as text (by
 default at half resolution — pass `--full` for every pixel). A `.bin` defaults to the **580** model.
 A `.cwiz`/`.wz` source is accepted too and built with the same front end as `wizc` (it keeps
-`wizc`'s target rules unless you name a model); a `#cwapp` source is patched into the built-in 580
-ROM and started directly.
+`wizc`'s target rules unless you name a model, so a source with no `for` section runs on the 880);
+a `#cwapp` source is patched into the built-in 580 ROM and started directly.
+
+The model label in the last line echoes the name you passed, or the internal name (`cw`/`cwii`)
+when the source default supplied it: `wizrun prog.wz` reports `(cwii, …)` while
+`wizrun prog.wz 880` reports `(880, …)`.
 
 ```console
-$ build/wizc examples/cwiz/10_app_hello.cwiz -o hello.bin
+$ build/wizc examples/cwapp/01_cwapp.cwiz -o hello.bin
 $ build/wizrun hello.bin 580
 ```
 
@@ -178,10 +196,13 @@ started at its app entry; any other image runs from its reset vector.
 | `-v`, `--version`, `-h` | verbose / version / help |
 
 ```console
-$ build/wizrun examples/03_keys.wz --keys K_RIGHT --steps 3000000
-              ##
-              ...
-ran examples/03_keys.wz  (880, stopped: max steps, 3000000 steps)
+$ build/wizrun examples/input/01_keys.cwiz 880 --keys K_RIGHT --steps 300000
+  #             #               # ###
+    ##  ## #    #   ### #        ##
+     ##### #    ## ### #        #   #
+  ## # ##  #    # # ###        #####
+
+ran examples/input/01_keys.cwiz  (880, stopped: max steps, 300000 steps)
 ```
 
 The last line above the screen is the stop reason and the step count — useful to tell a finished
@@ -225,7 +246,7 @@ It:
 4. launches CasioEmuMsvc on that model.
 
 ```console
-$ build/customromrun --model 580 examples/01_hello.bin
+$ build/customromrun --model 580 examples/hello/01_hello.bin
 customromrun <base model dir> -> <models>/01_hello
     base model fx-580VN X | custom rom …/01_hello.bin | replaces rom.bin
     OK model prepared at …/models/01_hello
@@ -334,7 +355,7 @@ The `cwapp` target builds a Wiz program to live in the free flash of an exported
 4. Calling `exit()` in the program resets the firmware, returning to the normal menu.
 
 ```console
-$ build/patch_menu fx580vnx.bin examples/10_app_hello.wz patched.bin --slot 3
+$ build/patch_menu fx580vnx.bin examples/cwapp/02_app_hello.wz patched.bin --slot 3
 patch_menu patched.bin
     30E40  program (… bytes)
     25E1E  hook  03 e8 30 68 -> 00 f3 40 0e

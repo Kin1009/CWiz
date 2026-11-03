@@ -763,7 +763,7 @@ translation units compiled throughout
 and `casioctl` builds and its CTest suite passes independently.
 
 All scratch data used by `casioctl selftest` and the end-to-end test lives under
-`/Users/kin/Desktop/Wiz/temp/casioctl` (override with `CASIOCTL_TEMP_ROOT`);
+`temp/casioctl` in the workspace root (override with `CASIOCTL_TEMP_ROOT`);
 nothing is written to `/tmp` or `TMPDIR`. The test removes its subdirectory on
 exit.
 

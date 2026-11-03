@@ -24,22 +24,31 @@ built:
   build/wizrun
   build/customromrun
   build/patch_menu
+  build/wizlint
   build/wiztests
 
-$ build/wizc examples/01_hello.wz
-CC examples/01_hello.wz -> examples/01_hello.bin
-    [880 ML620909 nX-U8/100] 14 variables, 2564 bytes ROM
+$ build/wizc examples/hello/01_hello.wz
+CC examples/hello/01_hello.wz -> examples/hello/01_hello.bin
+    [880 ML620909 nX-U8/100] 13 variables, 2812 bytes ROM
 
-$ build/wizrun examples/01_hello.wz --steps 1500000
-                    ####   #    #
-                    #      #    #
-  ...
-ran examples/01_hello.wz  (stopped: max steps, 1500000 steps)
+$ build/wizrun examples/hello/01_hello.wz 880 --steps 200000
+    # #    #  #          # #       #
+    # # ##       #       ###   ### #
+    # ####      # #      # # #  #  #
+    # # ## ## ## #  #    # # # ### #
+    ...
+     #       ### #  # # ## #   # #     #    #  #  # ## ### #
+     # # #   #  # ## ## ####               # ## ## ## # # #
+     #  #      ## ## #   ###               # ## ## ## # ###
+     # # #   ##  #  #  # # #   # #   #      #  #  # ##  #  ##
+
+ran examples/hello/01_hello.wz  (880, stopped: halt: B to self at 01DC, 144063 steps)
 ```
 
 `wizrun` executes the compiled program in the bundled simulator and draws the LCD as text
 (` #` = on, blank = off). This is how you develop: iterate in the simulator, then run the `.bin`
-under the emulator (see [RUNNING.md](RUNNING.md)).
+under the emulator (see [RUNNING.md](RUNNING.md)). A source without a `for` section builds for the
+880, and naming the model (`wizrun prog.wz 880`) keeps the log line explicit.
 
 ---
 
@@ -268,7 +277,7 @@ circle(cx, cy, r, c=1)       # circle outline
 disc(cx, cy, r, c=1)         # filled circle
 ```
 
-`c` is the colour: non-zero draws, `0` erases. See [examples/02_shapes.wz](../examples/02_shapes.wz).
+`c` is the colour: non-zero draws, `0` erases. See [examples/shapes/02_shapes.cwiz](../examples/shapes/02_shapes.cwiz).
 
 ---
 
@@ -424,10 +433,15 @@ const K_EXE = 15      # only allowed for a K_* name the target does not already 
 ## 14. Timing
 
 ```python
-delay(n)     # busy-wait n units (uncalibrated: measure on your hardware if it matters)
+delay(n)        # busy-wait n units (uncalibrated: measure on your hardware if it matters)
+delay_ms(ms)    # wait ms milliseconds on Timer0 (8 ticks per ms)
+t = ticks()     # Timer0 counter, 8 counts per millisecond; starts on first call
 ```
 
-`delay` is the only timing primitive. Games use `delay(3)`–`delay(5)` per frame.
+`delay` is the uncalibrated busy-wait and is what most examples use
+(`delay(3)`–`delay(5)` per frame). `delay_ms` and `ticks` are the calibrated pair
+built on Timer0: use them when a duration or an elapsed-time poll actually
+matters. `ticks()` wraps at 65536, so compare differences, not absolute values.
 
 ---
 
@@ -575,8 +589,10 @@ wizc: 1 error generated.
 
 ## 19. Where to go next
 
-- Browse [examples/](../examples) — each file is heavily commented, from `01_hello` to a full
-  Pong game and a firmware-patchable app; `examples/cwiz/` mirrors the tour in CWiz.
+- Browse [examples/](../examples) — each program is heavily commented, from `hello/01_hello` to a
+  full Pong game (`input/02_pong.wz`) and a firmware-patchable app (`cwapp/`). Six categories are
+  CWiz-only (`shapes`, `text`, `arrays`, `bitmap`, `vietnamese`, `580_880`); the rest have a Wiz
+  twin where the language allows one. `examples/README.md` is the map.
 - The [API reference](API.md) lists every built-in and standard-library function.
 - [ARCHITECTURE.md](ARCHITECTURE.md) explains what the compilers emit and how the runtime works.
 
@@ -732,7 +748,10 @@ rom8 char debug_tag[4] = "dbg";
 `#include` is the one thing that adds lines; when a diagnostic points inside an included file the
 drivers report that file and line, and `wiz::cwiz_line_origin()` in [API.md](API.md) exposes the
 same map.
-See [examples/cwiz/07_preproc.cwiz](../examples/cwiz/07_preproc.cwiz).
+
+There is no preprocessor example in `examples/` yet: `#include`, `#define` and `#if` are covered
+by `tests/test_cpre.cpp`, and `wizc -E` prints the result after preprocessing
+(see [RUNNING.md](RUNNING.md#seeing-what-the-preprocessor-did--e)).
 
 ### 20.2 Pointers and memory
 
@@ -787,5 +806,8 @@ Three honest caveats:
    pointer is two bytes, so `p = 0xA000;` and `x = p;` compile. The compiler checks what it can
    (`*x` on an `int` is an error) but it will not stop you from writing an address you should not.
 
-See [examples/cwiz/08_pointers.cwiz](../examples/cwiz/08_pointers.cwiz) and
-[API.md](API.md#cwizhpp--the-cwiz-front-end) for the compiler interface.
+Pointers are not covered by a standalone example yet. They are exercised by
+`tests/test_cwiz.cpp` (declarators, `&`, `*`, `p[i]`, pointer arithmetic) and
+listed in [C-CONFORMANCE.md](C-CONFORMANCE.md); `examples/arrays/01_arrays.cwiz`
+shows the array/ROM-table side they build on. The compiler interface is in
+[API.md](API.md#cwizhpp--the-cwiz-front-end).

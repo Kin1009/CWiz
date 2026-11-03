@@ -30,10 +30,18 @@ accepted by the compiler and reported by `wizlint`.
 | `#pragma once`, `#error`, `#line`, `#embed` | any | CWiz | File/preprocessor directives |
 | `for 580` / `for 880` | 580 / 880 | Wiz | Target sections (Wiz syntax) |
 
-Target names used in editor dropdown / status bar:
-- **580** — `cw` / `cwapp` / `cwrop`
-- **880** — `cwii` / `cwiirop`
-- **fwnx** — firmware / ROP payload (same chip, different emission mode)
+Target ids used by the compiler and the CLI (`wiz::canonical` in
+`compiler/src/targets.cpp`):
+- **580** — `580` (internal/alias name `cw`); the `cwapp` flavour adds the
+  fx-580VN X firmware-patch emission mode.
+- **880** — `880` (internal/alias name `cwii`).
+- **fwnx** — full firmware image for `#binary` payloads (`--target fwnx`); not a
+  bootable target.
+
+There are **no** `cwrop`/`cwiirop` targets: the ROP backend is selected by the
+`#rop` directive inside a normal `.cwiz`/`.wz` source, and `wizc` reports it as
+`[ROP 580]` or `[ROP 880]`. An editor that offers a "ROP target" must map it to
+the source's declared calculator, not to a separate target id.
 
 Language names:
 - **Wiz** — `.wz` source (original)

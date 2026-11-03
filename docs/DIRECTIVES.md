@@ -18,9 +18,10 @@ number  := "0x" hexdigit+ | digit+
   with `preproc.directive-argument`.
 * Canonical spelling: addresses are uppercase hex with `0x` (`0xE9E0`);
   sizes, counts and slots are decimal (`256`, `2`).
-* Compatibility aliases (accepted, warned by lint): bare hexadecimal such as
-  `#org E9E0` and `[...]`-wrapped addresses used by older ROP notes.  New
-  sources must use `0xE9E0`.
+* Compatibility aliases (accepted; `wizlint` flags most of them as
+  `preproc/noncanonical-directive`, see [Known lint gaps](#known-lint-gaps)):
+  bare hexadecimal such as `#org E9E0` and `[...]`-wrapped addresses used by
+  older ROP notes.  New sources must use `0xE9E0`.
 
 ## String grammar
 
@@ -64,8 +65,9 @@ system include path.
 | `#launcher common [short\|medium\|long] [backup] [main]` | launcher | ROP | canonical launcher; `shared`/`chung` are compatibility aliases |
 | `#launcher simple [address]` | launcher | ROP | simple stub; a bare address (`#launcher 0x8154`) is a compatibility alias |
 
-Compatibility aliases are accepted so existing sources keep building, but
-`wizlint` reports `preproc/noncanonical-directive` with the canonical spelling.
+Compatibility aliases are accepted so existing sources keep building. `wizlint`
+reports most of them as `preproc/noncanonical-directive` with the canonical
+spelling; the two exceptions are listed under [Known lint gaps](#known-lint-gaps).
 The current aliases are:
 
 | Alias | Canonical |
@@ -111,6 +113,20 @@ Rules (one error family: `sema.type-placement` / `preproc.attribute-placement`):
   `__normalized__ char buf[N] = "..."` is also accepted (RAM buffer).  It is
   rejected on `rom int`, non-char arrays, scalars, and functions with
   `preproc.attribute-placement`.
+
+## Known lint gaps
+
+Verified against `compiler/src/lint.cpp` and `build/wizlint` on 2026-11-03.
+These are documentation-visible because the alias table above promises lint
+coverage; the compiler is unaffected and accepts every alias listed there.
+
+| Gap | Effect |
+|---|---|
+| `#org`, `#pad`, `#launcher` aliases are never reported | `#org E9E0`, `#org [E9E0]`, `#pad 0x100` and `#launcher chung` produced no `preproc/noncanonical-directive` in the sources tested (a `#cwapp` source and a `#rop` payload), while `wizc` built all of them. Only `#for` aliases reach the checker. |
+| `#for cw` / `#for cwii` are reported as `preproc/unknown-target` | `targets.cpp` accepts both as aliases and `wizc` compiles them, but the lint header check only knows `580`, `880`, `cwapp` and `all`, so it emits a false error instead of a canonical-spelling hint. |
+
+Until these are fixed, treat `wizlint` as advisory for ROP directive spelling and
+rely on the canonical forms in this file when writing new sources.
 
 See [C-CONFORMANCE.md](C-CONFORMANCE.md) for the C language matrix and
 [WIZ-COMPILER.md](WIZ-COMPILER.md) for the implementation map.

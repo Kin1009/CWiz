@@ -421,15 +421,20 @@ touches the original `.plugin` file.
 
 ## 8. Discovery
 
-Search order:
+The host scans three roots, in this order (`PluginRegistry.cpp` —
+`SettingsDir()`, `UserPluginsDir()` and `Initialize()`):
 
-1. `~/Library/Application Support/CasioEmuMsvc/Plugins/*.plugin`
-2. `<app bundle>/plugins/*.plugin` (read-only built-ins)
-3. `<app bundle>/../plugins/*.plugin` for portable builds
+1. `<settings dir>/Plugins/*.plugin` — read-write. The settings dir is
+   `~/Library/Application Support/CasioEmuMsvc` on macOS, or `<executable dir>/settings`
+   when a `portable.flag` file sits next to the executable.
+2. `<executable dir>/plugins/*.plugin` — read-only built-ins shipped beside the
+   binary.
+3. `<executable dir>/../Resources/plugins/*.plugin` — the macOS bundle layout
+   (`Contents/MacOS/../Resources/plugins`).
 
 If the same id appears twice, the user folder wins and the duplicate is logged.
 A workspace `.plugins` folder is reserved for a later release and is not read by
-v1.
+v1. `plugins/EXAMPLES.md` documents the same roots and the portable case.
 
 ---
 
@@ -445,7 +450,9 @@ The repository ships one example per type under `examples/plugins/`:
 | `tool-clock` | `tool` | Native `UIWindow` |
 | `tab-notes` | `tab` | Native tab with per-session notes |
 
-Each example has a `README.md` with build and packaging commands.
+Each folder contains `plugin.json` and its `assets/`. The two native examples
+(`tool-clock`, `tab-notes`) also ship `src/`, a `build.sh`, and a checked-in
+universal `lib/*.dylib`; there are **no per-example `README.md` files**.
 
 See [plugins/EXAMPLES.md](plugins/EXAMPLES.md) for the actual build, package, and
 install commands, and [PLUGIN-GUIDE.md](PLUGIN-GUIDE.md#7-the-five-example-plugins)
