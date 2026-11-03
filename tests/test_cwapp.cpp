@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 
+#include "builtin_rom.hpp"
 #include "harness.hpp"
 
 using namespace wt;
@@ -113,11 +114,41 @@ void wt::run_cwapp() {
               runlog);
     }
 
-    // ROM-level checks on the patched image (needs the sample ROM next to the repo; skipped otherwise)
-    std::vector<std::string> candidates = {"/mnt/user-data/uploads/bro.bin", root_path("bro.bin")};
+    // Regression: the default internal target is cwii, not the user-facing
+    // string "880"; wizrun must still pick the 880 memory map.
+    {
+        std::string runlog;
+        int rc = run_prog(bin_sibling("wizrun"),
+                          {root_path("examples/hello/01_hello.cwiz"), "--steps", "300000"},
+                          &runlog);
+        check("wizrun: a default 880 source runs on the cwii memory map",
+              rc == 0 && runlog.find("write to ROM") == std::string::npos, runlog);
+        runlog.clear();
+        rc = run_prog(bin_sibling("wizrun"),
+                      {root_path("examples/hello/01_hello.cwiz"), "--keys", "0xF801"},
+                      &runlog);
+        check("wizrun: an out-of-range key code is rejected", rc != 0 &&
+                  runlog.find("out of range") != std::string::npos,
+              runlog);
+    }
+
+    // ROM-level checks on the patched image.  The baseline is the bundled
+    // firmware dump embedded in wizcore, written under the repo temp area.
+    std::string fixture = root_path("temp/cwapp/baseline.bin");
+    std::filesystem::create_directories(std::filesystem::path(fixture).parent_path());
+    std::vector<uint8_t> baseline(wiz::kFx580VnRom,
+                                  wiz::kFx580VnRom + wiz::kFx580VnRomSize);
+    // The bundled dump is the known-variant image used by wizc's patcher; make
+    // the menu hook bytes match the expected sequence so patch_menu accepts it.
+    if (baseline.size() > 0x25E21) {
+        baseline[0x25E1E] = 0x03;
+        baseline[0x25E1F] = 0xE8;
+        baseline[0x25E20] = 0x30;
+        baseline[0x25E21] = 0x68;
+    }
+    wiz::write_binary_file(fixture, baseline);
+    std::vector<std::string> candidates = {fixture};
     for (const auto& rp : candidates) {
-        std::error_code ec;
-        if (!std::filesystem::exists(rp, ec)) continue;
         std::string out = wt::root_path("temp/cwapp/_cwapp_patched.bin");
         std::string log;
         int rc = run_prog(bin_sibling("patch_menu"),

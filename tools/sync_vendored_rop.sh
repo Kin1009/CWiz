@@ -17,7 +17,9 @@ check=0
 [ "${1:-}" = "--check" ] && check=1
 
 targets="
+${WIZ_VENDORED_DIR:-}
 $root/emulator/CasioEmuMsvc/third_party/wiz/src
+$root/../CasioEmuMsvc-Mac/CasioEmuMsvc/third_party/wiz/src
 $root/../CasioEmuMsvc-Mac-stable/CasioEmuMsvc/third_party/wiz/src
 "
 

@@ -743,6 +743,14 @@ void wt::run_cwiz() {
               std::to_string(var_of(r.m, r.vars, "R")));
     }
 
+    {
+        Machine r = run("int is_even(int n) { if (n == 0) return 1; return is_odd(n - 1); }"
+                        " int is_odd(int n) { if (n == 0) return 0; return is_even(n - 1); }"
+                        " int R; void main() { R = is_even(10); }");
+        check("mutual recursion saves/restores both frames", var_of(r.m, r.vars, "R") == 1,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
     // --------------------------------------------------------------------- goto
     {
         Machine r = run("int R; void main() { int i = 0; again: R = R + 1; i = i + 1;"

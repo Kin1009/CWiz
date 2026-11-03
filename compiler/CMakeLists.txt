@@ -76,6 +76,7 @@ add_executable(wiztests
 )
 target_include_directories(wiztests PRIVATE "${WIZ_TESTS_DIR}")
 target_link_libraries(wiztests PRIVATE wizcore)
+add_dependencies(wiztests wizc patch_menu)
 
 enable_testing()
 add_test(NAME toolchain COMMAND wiztests)
@@ -83,3 +84,9 @@ add_test(NAME toolchain COMMAND wiztests)
 # Compile the ROM agent's CWiz corpus.  Reports go under <repo>/temp/corpus.
 add_executable(corpus_check src/main_corpus.cpp)
 target_link_libraries(corpus_check PRIVATE wizcore)
+add_dependencies(corpus_check wizc)
+
+# Report stale vendored ROP copies; does not modify the emulator tree.
+add_custom_target(vendored_check
+  COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/../tools/sync_vendored_rop.sh" --check
+  COMMENT "Checking vendored ROP copies")

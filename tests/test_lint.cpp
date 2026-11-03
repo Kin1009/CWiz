@@ -1,5 +1,7 @@
 // test_lint.cpp - wizlint core tests.
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,21 @@ bool has(const std::vector<wiz::LintDiagnostic>& diags, const std::string& rule)
 std::vector<wiz::LintDiagnostic> lint(const std::string& src, const std::string& file = "t.cwiz",
                                       const std::string& target = "cwii") {
     return wiz::lint_source(src, file, target);
+}
+
+std::pair<int, std::string> run_wizlint(const std::vector<std::string>& args) {
+    namespace fs = std::filesystem;
+    std::string exe = (fs::path(g_wizc()).parent_path() / "wizlint").string();
+    std::string cmd = "'" + exe + "'";
+    for (const auto& a : args) cmd += " '" + a + "'";
+    cmd += " 2>&1";
+    FILE* p = popen(cmd.c_str(), "r");
+    if (!p) return {-1, ""};
+    std::string out;
+    char buf[2048];
+    while (std::fgets(buf, sizeof(buf), p)) out += buf;
+    int st = pclose(p);
+    return {WIFEXITED(st) ? WEXITSTATUS(st) : st, out};
 }
 
 }  // namespace
@@ -307,6 +324,26 @@ void wt::run_lint() {
         auto d = lint("int a = 1, b = 2, c[2] = {3, 4};\n"
                       "int main() { return a + b + c[0] + c[1]; }\n");
         check("lint: multiple declarators are all seen", !has(d, "readability/unused-variable"));
+    }
+
+    {
+        auto d = lint("int main() { return 0; }\n", "UP.CWIZ");
+        check("lint: language detection is case-insensitive", !has(d, "compile"),
+              has(d, "compile") ? find_rule(d, "compile")->message : "");
+    }
+
+    {
+        std::string p = wt::root_path("temp/lint_cli.cwiz");
+        std::filesystem::create_directories(std::filesystem::path(p).parent_path());
+        wiz::write_text_file(p, "int main() { return 0; }\n");
+        auto bad_target = run_wizlint({"--target", "foo", p});
+        check("lint CLI: an unknown --target is rejected",
+              bad_target.first != 0 && bad_target.second.find("unknown target") != std::string::npos,
+              bad_target.second);
+        auto bad_color = run_wizlint({"--color=bogus", p});
+        check("lint CLI: --color=bogus is a clean error, not a crash",
+              bad_color.first != 0 && bad_color.second.find("invalid value") != std::string::npos,
+              bad_color.second);
     }
 
     // The compiled-program font is the original Wiz 6x8 ASCII font

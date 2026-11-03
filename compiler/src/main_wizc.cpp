@@ -76,8 +76,8 @@ static std::string resolve_target(const Cli& args, Diag& d, const std::string& s
         if (ok) {
             try {
                 declared = declared_targets(text);
-            } catch (...) {
-                declared.clear();
+            } catch (const SectionError& e) {
+                d.fatal(e.what());
             }
         }
         // A #cwapp section means "firmware app": build it and patch the built-in

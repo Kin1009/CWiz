@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "build.hpp"
+#include "cli.hpp"
 #include "common.hpp"
 
 int main(int argc, char** argv) {
@@ -24,7 +25,13 @@ int main(int argc, char** argv) {
         else if (a == "--out" && i + 1 < argc) out = argv[++i];
         else corpus = a;
     }
+    wiz::set_data_dir(wiz::autodetect_data_dir(argv[0]));
     std::error_code ec;
+    if (!fs::is_directory(corpus, ec)) {
+        std::fprintf(stderr, "corpus_check: corpus directory not found: %s\n",
+                     corpus.string().c_str());
+        return 2;
+    }
     fs::create_directories(out, ec);
     std::vector<fs::path> files;
     for (const auto& e : fs::directory_iterator(corpus, ec)) {
@@ -37,6 +44,11 @@ int main(int argc, char** argv) {
         fs::path nd = corpus.parent_path() / "named";
         for (const auto& e : fs::directory_iterator(nd, ec))
             if (e.is_regular_file() && e.path().extension() == ".cwiz") files.push_back(e.path());
+    }
+    if (files.empty()) {
+        std::fprintf(stderr, "corpus_check: no .cwiz modules in %s\n",
+                     corpus.string().c_str());
+        return 2;
     }
     std::sort(files.begin(), files.end());
     std::vector<std::string> failures;

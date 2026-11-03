@@ -63,6 +63,8 @@ static bool parse_key(const std::string& token, const std::string& target, Diag&
         if (end == t.c_str() || (end && *end != '\0'))
             d.fatal(fmt("unknown key '%s' (use a K_* name or a number)", t.c_str()));
     }
+    if (k < 0 || k >= 64)
+        d.fatal(fmt("key code %lld is out of range (0..63)", k));
     ko = (int)(0x80 >> (k >> 3));
     ki = (int)(0x80 >> (k & 7));
     return true;
@@ -238,7 +240,9 @@ int main(int argc, char** argv) {
 
     // The simulator target name carries the core and LCD geometry.  The user-
     // facing model stays 580/880, so pick "cwapp" only for the app's row layout.
-    const std::string sim_target = patched ? "cwapp" : (target == "880" ? "cwii" : "cw");
+    auto sim_canon = canonical(target);
+    const std::string sim_target =
+        patched ? "cwapp" : (sim_canon && *sim_canon == "cwii" ? "cwii" : "cw");
     const Target& tg = get_target(sim_target);
 
     int start_csr = -1, start_pc = -1;

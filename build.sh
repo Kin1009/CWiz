@@ -6,7 +6,8 @@
 #     ./build.sh --clean      wipe ./build first
 #
 # After a successful build the tools are:
-#     build/wizc  build/wizrun  build/customromrun  build/patch_menu  build/wiztests
+#     build/wizc  build/wizrun  build/customromrun  build/patch_menu
+#     build/wizlint  build/wiztests  build/corpus_check
 set -e
 
 cd "$(dirname "$0")"
@@ -37,6 +38,6 @@ cmake --build build --parallel
 
 echo
 echo "built:"
-for t in wizc wizrun customromrun patch_menu wiztests; do
+for t in wizc wizrun customromrun patch_menu wizlint wiztests corpus_check; do
     [ -x "build/$t" ] && echo "  build/$t"
 done

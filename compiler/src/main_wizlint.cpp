@@ -142,6 +142,15 @@ int main(int argc, char** argv) {
 
     std::string target = a.value("target");
     if (target.empty()) target = "auto";
+    if (target != "auto") {
+        auto canon = canonical(target);
+        if (!canon) {
+            std::fprintf(stderr, "wizlint: error: unknown target '%s' (use 580, 880, cwapp or fwnx)\n",
+                         target.c_str());
+            return 2;
+        }
+        target = *canon;
+    }
     int line_limit = 100;
     if (a.has("line-length")) {
         char* end = nullptr;

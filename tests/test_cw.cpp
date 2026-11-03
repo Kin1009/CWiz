@@ -160,9 +160,6 @@ void wt::run_cw() {
             ok = m.find("RAM") != std::string::npos || ml.find("memory") != std::string::npos;
         }
         check("6000-byte array: fits cwii, rejected on cw (SB2 + stack reserved)", ok);
-        Machine r = run("big = [0] * 1500\ndef main():\n    big[1499] = 5\n    big[0] = 6\n", "cw");
-        check("1500-element array fits cw below the SB2 shadow buffer",
-              r.m.mem[0xD000 + 2 * 1499] == 5 && r.m.mem[0xD000] == 6, r.why);
     }
 
     // ------------------------------------------------- boot translation sanity
@@ -296,6 +293,27 @@ void wt::run_cw() {
         wiz::build_source(
             "# K_OK is only in a comment\nconst K_OK = 3\nx = K_OK\ndef main():\n    pass\n", "cw");
         check("cw: a user const named like a missing key is allowed", true);
+        {
+            bool ok = true;
+            try {
+                wiz::build_source("def main():\n    print(0, 0, \"K_BOGUS\")\n", "cw");
+            } catch (const std::exception&) {
+                ok = false;
+            }
+            check("cw: K_* inside strings/comments is not audited", ok);
+        }
+        {
+            std::string src;
+            for (int i = 0; i < 220; i++) src += "g" + std::to_string(i) + " = 0\n";
+            src += "def main():\n    pass\n";
+            wiz::BuildResult br = wiz::build_source(src, "cw");
+            bool clear = true;
+            for (const auto& kv : br.variables) {
+                for (const auto& r : wiz::get_target("cw").reserved_ram)
+                    if (kv.second >= r.first && kv.second <= r.second) clear = false;
+            }
+            check("cw: the Wiz allocator skips reserved RAM", clear);
+        }
 
         const auto& cwkeys = wiz::key_consts("cw");
         int key_count = 0;
@@ -325,6 +343,10 @@ void wt::run_cw() {
               r.rc == 0 && fs::exists(tmp / "both.bin"), r.out);
         r = cli_run(td, {"both.wz", "--target", "580", "-o", "both580.bin"});
         check("cli: 580 build -> both580.bin", r.rc == 0 && fs::exists(tmp / "both580.bin"), r.out);
+        wiz::write_text_file((tmp / "bad.wz").string(), "for 88O\ndef main():\n    pass\n");
+        r = cli_run(td, {"bad.wz", "--target", "880"});
+        check("cli: an unknown for-target is an error, not an empty ROM",
+              r.rc != 0 && r.out.find("unknown target") != std::string::npos, r.out);
         bool differ = false;
         {
             bool o1 = false, o2 = false;

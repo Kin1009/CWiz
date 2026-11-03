@@ -108,6 +108,11 @@ std::vector<uint8_t> community_launcher(uint8_t code, uint16_t src, uint16_t dst
 
 void wt::run_rop() {
     check("rop: source marker selects backend", wiz::source_is_rop(hello_source()));
+    check("rop: #rop must be the exact directive token",
+          !wiz::source_is_rop("#rop is not a thing\nint main() { }\n") &&
+              !wiz::source_is_rop("// #rop\nint main() { }\n"));
+    check("rop: #rop inside an inactive #if 0 is ignored",
+          !wiz::source_is_rop("#if 0\n#rop\n#endif\nint main() { }\n"));
 
     // Cross-compiled with RAC/hdcompiler's equivalent low-level source:
     // The compiler supplies RAC's setlr; setsfr preamble, then emits

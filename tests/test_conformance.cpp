@@ -343,6 +343,31 @@ void wt::run_conformance() {
               wiz::fmt("%04X %04X", w0, w1));
     }
 
+    {
+        wiz::Assembler a("nX-U16/100");
+        auto img = a.assemble("ORG 0\nPUSH PSW\nPOP PSW\nB 4\n");
+        std::vector<uint8_t> rom;
+        for (int i = 0; i < 16; i++) rom.push_back(img.count((uint32_t)i) ? img[(uint32_t)i] : 0);
+        wiz::U8 m(rom, {}, "cwii", 0, 0);
+        std::string why = m.run(1000);
+        check("sim: PUSH/POP PSW is available and balanced", why.find("halt") != std::string::npos,
+              why);
+        auto pc = a.assemble("ORG 0\nPUSH PC\nPOP PC\n");
+        int push_pc = (pc.count(0) ? pc[0] : 0) | ((pc.count(1) ? pc[1] : 0) << 8);
+        int pop_pc = (pc.count(2) ? pc[2] : 0) | ((pc.count(3) ? pc[3] : 0) << 8);
+        check("assembler: PUSH PC / POP PC encode their bits",
+              push_pc == 0xF2CE && pop_pc == 0xF28E,
+              wiz::fmt("%04X %04X", push_pc, pop_pc));
+        bool bad_reg = false;
+        try {
+            wiz::Assembler b("nX-U16/100");
+            b.assemble("ORG 0\nPUSH R20\n");
+        } catch (const std::exception&) {
+            bad_reg = true;
+        }
+        check("assembler: register operands are bounds-checked", bad_reg);
+    }
+
     // ------------------------------------------------------------ varargs
     {
         Machine r = run("#include <stdarg.h>\n"
@@ -363,6 +388,26 @@ void wt::run_conformance() {
         check("C23: ckd_add/strdup freestanding subset",
               var_of(r.m, r.vars, "R") == -32666,
               std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
+    {
+        Machine r = run("rom int t[2] = {1 << 16, 1 << 20}; int R;"
+                        " void main() { R = t[0] + t[1]; }");
+        check("constant folding: out-of-range shifts agree everywhere",
+              var_of(r.m, r.vars, "R") == 0, std::to_string(var_of(r.m, r.vars, "R")));
+    }
+
+    {
+        Err e = err_of("#binary \"x.bin\"\nvoid main() { }\n", "cwii");
+        check("error: #binary on a non-fwnx target is rejected",
+              e.ok && e.code == "build.binary-target", e.msg);
+        std::string dir = wt::root_path("temp/binary");
+        std::filesystem::create_directories(dir);
+        wiz::write_binary_file(dir + "/fw.bin", {0x12, 0x34, 0x56, 0x78});
+        wiz::BuildResult br =
+            wiz::build_cwiz("#binary \"fw.bin\"\n", "fwnx", dir + "/t.cwiz");
+        check("C: #binary resolves against the source file", br.rom.size() == 4 &&
+                  br.rom[0] == 0x12 && br.rom[3] == 0x78);
     }
 
     // ------------------------------------------------------------ target limits
@@ -520,6 +565,53 @@ void wt::run_conformance() {
         }
         check("examples: every source compiles", bad.empty(),
               bad.empty() ? std::to_string(built) + " programs" : ("failed: " + bad));
+    }
+
+    {
+        namespace fs = std::filesystem;
+        std::string bad;
+        int ran = 0, skipped = 0;
+        std::error_code ec;
+        fs::path root = wt::root_path("examples");
+        if (fs::exists(root, ec)) {
+            for (auto it = fs::recursive_directory_iterator(root, ec);
+                 !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (!it->is_regular_file()) continue;
+                std::string ext = it->path().extension().string();
+                if (ext != ".cwiz" && ext != ".wz") continue;
+                std::string p = it->path().string();
+                std::stringstream ss;
+                { std::ifstream in(it->path()); ss << in.rdbuf(); }
+                std::string text = ss.str();
+                if (text.find("#rop") != std::string::npos) { skipped++; continue; }
+                bool cwapp = text.find("#cwapp") != std::string::npos ||
+                             text.find("for cwapp") != std::string::npos;
+                std::string target = cwapp ? "cwapp"
+                                     : (p.find("580") != std::string::npos ? "cw"
+                                        : (p.find("880") != std::string::npos ? "cwii"
+                                                                              : "cwii"));
+                try {
+                    wiz::BuildResult br = ext == ".cwiz"
+                                              ? wiz::build_cwiz(text, target, p)
+                                              : wiz::build_source(text, target, p);
+                    wiz::U8 m = cwapp ? wiz::U8(br.rom, {}, "cwapp",
+                                                (br.syms.at("_APP") >> 16) & 0xFFFF,
+                                                br.syms.at("_APP") & 0xFFFF, {{0, 0xA1CE}})
+                                      : wiz::U8(br.rom, {}, target);
+                    std::string why = m.run(300000);
+                    if (why.find("write to ROM") != std::string::npos ||
+                        why.find("fault") != std::string::npos)
+                        bad = p + ": " + why;
+                    ran++;
+                } catch (const std::exception& e) {
+                    bad = p + ": " + e.what();
+                }
+            }
+        }
+        check("examples: every plain program runs without a fault", bad.empty(),
+              bad.empty() ? std::to_string(ran) + " ran, " + std::to_string(skipped) +
+                                " ROP/cwapp skipped"
+                          : bad);
     }
 
     // ------------------------------------------------------------ directive grammar
