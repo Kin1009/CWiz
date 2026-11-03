@@ -20,7 +20,7 @@ int main() {
     render();
 loop:
     asm {
-        // slot = 0x3030, so a released key matches no table entry
+        // slot = 0x0000, so a released key matches no table entry
         "pop xr0";
         "0xE8E8";
         "0x0000";

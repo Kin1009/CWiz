@@ -6,3 +6,4 @@ void main() {
     text(8, 24, "fx-580VN X / 880BTG");
     render();
 }
+
