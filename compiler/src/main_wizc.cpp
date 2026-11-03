@@ -156,9 +156,9 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
     std::string bin_path, asm_path;
     output_paths(src, args.value("output"), bin_path, asm_path);
     const std::string launcher_path = splitext_root(bin_path) + ".launcher.bin";
-    std::string listing = fmt("; ROP payload @ %04X (%zu bytes)\n; launcher @ %04X (%zu bytes)\n",
+    std::string listing = fmt("# ROP payload @ %04X (%zu bytes)\n# launcher @ %04X (%zu bytes)\n",
                                rop.base, rop.bytes.size(), rop.launcher_base, rop.launcher.size());
-    listing += "; launcher: " + rop.launcher_hex + "\n" + rop.log;
+    listing += "# launcher: " + rop.launcher_hex + "\n" + rop.log;
     try {
         if (!args.has("no-asm") && !write_text_file(asm_path, listing))
             d.fatal("cannot write output: " + asm_path);

@@ -37,6 +37,7 @@ add_library(wizcore STATIC
   src/sim.cpp
   src/wiz.cpp
   src/cwiz.cpp
+  src/directives.cpp
   src/cpre.cpp
   src/build.cpp
   src/builtin_rom.cpp
@@ -69,6 +70,7 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_cwiz.cpp
   ${WIZ_TESTS_DIR}/test_cpre.cpp
   ${WIZ_TESTS_DIR}/test_lint.cpp
+  ${WIZ_TESTS_DIR}/test_conformance.cpp
   ${WIZ_TESTS_DIR}/test_fuzz.cpp
   ${WIZ_TESTS_DIR}/test_rop.cpp
 )
@@ -77,3 +79,7 @@ target_link_libraries(wiztests PRIVATE wizcore)
 
 enable_testing()
 add_test(NAME toolchain COMMAND wiztests)
+
+# Compile the ROM agent's CWiz corpus.  Reports go under <repo>/temp/corpus.
+add_executable(corpus_check src/main_corpus.cpp)
+target_link_libraries(corpus_check PRIVATE wizcore)

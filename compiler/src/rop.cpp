@@ -32,7 +32,9 @@
 // BL-based display routines on the 580.
 
 #include "rop.hpp"
+#include "directives.hpp"
 #include "rop_data.hpp"
+#include "vn_f4.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -53,41 +55,24 @@ namespace {
 struct CharMap {
     std::unordered_map<unsigned, std::vector<uint8_t>> map;
     CharMap() {
+        // ASCII and the calculator's extra symbols.  Vietnamese letters are
+        // merged from VN_F4_TABLE (vn_f4.hpp) below, the same source used by
+        // the CWiz/Wiz front ends, so this table is not duplicated here.
         static const char* chars =
-            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-            "ÁáÀàẢảÃãẠạĂăẮắẰằẲẳẴẵẶặÂâẤấẦầẨẩẪẫẬậÉéÈèẺẻẼẽẸẹÊêẾếỀềỂểỄễỆệ"
-            "ÍíÌìỈỉĨĩỊịÓóÒòỎỏÕõỌọÔôỐốỒồỔổỖỗỘộƠơỚớỜờỞởỠỡỢợÚúÙùỦủŨũỤụ"
-            "ƯưỨứỪừỬửỮữỰựÝýỲỳỶỷỸỹỴỵĐđ~@_&-+()/*':!?|√÷×^°{}[]%.,";
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz~@_&-+()/*"
+            "':!?|√÷×^°{}[]%.,";
         static const char* hexes[] = {
-            "30","31","32","33","34","35","36","37","38","39",
-            "41","42","43","44","45","46","47","48","49","4A",
-            "4B","4C","4D","4E","4F","50","51","52","53","54",
-            "55","56","57","58","59","5A","61","62","63","64",
-            "65","66","67","68","69","6A","6B","6C","6D","6E",
-            "6F","70","71","72","73","74","75","76","77","78",
-            "79","7A","F451","F471","F450","F470","F454","F474",
-            "F453","F473","F410","F465","F455","F475","F411","F431",
-            "F412","F432","F490","F456","F491","F457","F413","F433",
-            "F452","F472","F414","F434","F415","F435","F416","F436",
-            "F492","F477","F417","F437","F459","F479","F458","F478",
-            "F45B","F47B","F418","F438","F419","F439","F45A","F47A",
-            "F41A","F43A","F41B","F43B","F41C","F43C","F41D","F43D",
-            "F41E","F43E","F45D","F47D","F45C","F47C","F42B","F47F",
-            "F45E","F47E","F428","F448","F463","F483","F462","F482",
-            "F429","F486","F430","F485","F42A","F487","F464","F484",
-            "F41F","F43F","F420","F440","F421","F441","F422","F442",
-            "F423","F445","F444","F44D","F425","F44E","F426","F446",
-            "F427","F447","F443","F46E","F424","F48E","F46A","F48A",
-            "F469","F489","F42C","F48C","F42D","F48B","F42E","F488",
-            "F44F","F46F","F44A","F461","F44B","F467","F44C","F468",
-            "F48F","F476","F449","F481","F46D","F48D","F42F","F45F",
-            "F493","F466","F494","F46B","F495","F46C","F460","F480",
-            "20","40","5F","1A","2D","2B","28","29","2F",
-            "2A","27","3A","21","3F","7C","98","26",
-            "24","5E","85","7B","7D","5B","5D","25",
-            "2E","2C",
+            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+            "41", "42", "43", "44", "45", "46", "47", "48", "49", "4A",
+            "4B", "4C", "4D", "4E", "4F", "50", "51", "52", "53", "54",
+            "55", "56", "57", "58", "59", "5A", "61", "62", "63", "64",
+            "65", "66", "67", "68", "69", "6A", "6B", "6C", "6D", "6E",
+            "6F", "70", "71", "72", "73", "74", "75", "76", "77", "78",
+            "79", "7A", "20", "40", "5F", "1A", "2D", "2B", "28", "29",
+            "2F", "2A", "27", "3A", "21", "3F", "7C", "98", "26", "24",
+            "5E", "85", "7B", "7D", "5B", "5D", "25", "2E", "2C",
         };
-        // decode UTF-8 so multi-byte Vietnamese letters work
+        // decode UTF-8 so the symbols above work as codepoints
         std::vector<unsigned> cps;
         for (const unsigned char* p = (const unsigned char*)chars; *p;) {
             unsigned c = *p++;
@@ -105,6 +90,9 @@ struct CharMap {
                 b.push_back((uint8_t)std::strtoul(std::string(h + k, 2).c_str(), nullptr, 16));
             map[cp] = std::move(b);
         }
+        // Vietnamese: the firmware F4 key encoding is 0xF4 followed by a
+        // column byte.  rop.cpp, cwiz.cpp and wiz.cpp all use this table.
+        for (const auto& e : VN_F4_TABLE) map[e.cp] = {0xF4, e.code};
         map[' '] = {0x20};
         map['~'] = {0x20};
     }
@@ -604,6 +592,9 @@ std::vector<std::string> stdlib_candidates(const std::string& name) {
     else if (k == "print_small") push({"smallprint"});
     else if (k == "render" || k == "flush" || k == "flip") push({"render","render.ddd4","render.ca54"});
     else if (k == "delay" || k == "sleep") push({"delay"});
+    else if (k == "wait_shift" || k == "waitshift" || k == "wait") push({"waitshift"});
+    else if (k == "wait_shift_striped" || k == "waitshift_striped") push({"waitshift_striped"});
+    else if (k == "render_bitmap") push({"render_bitmap"});
     else if (k == "get_key" || k == "key") push({"getkey","getkeycode","getscancode","cvt_key"});
     else if (k == "is_key_pressed" || k == "check_key") push({"check_any_key_pressed__"});
     else if (k == "wait_key" || k == "pause") push({"diagnostic_wait_key"});
@@ -720,64 +711,7 @@ struct ChainRow {
     std::string name;    // gadget name (or the register for a pop)
 };
 
-const char* kind_name(GKind c) {
-    switch (c) {
-        case GKind::Pop: return "pop";
-        case GKind::Flow: return "flow";
-        case GKind::SetlrPc: return "setlr";
-        case GKind::Call: break;
-    }
-    return "call";
-}
-
-std::string hex_bytes_compact(const uint8_t* p, size_t n) {
-    static const char* digits = "0123456789ABCDEF";
-    std::string s;
-    for (size_t i = 0; i < n; i++) {
-        if (i) s += ' ';
-        s += digits[p[i] >> 4];
-        s += digits[p[i] & 0x0F];
-    }
-    return s;
-}
-
-// Build the low level listing of a payload:
-//
-//   E9E0  09 FA 30 30   call     0x09FA8  setlr
-//   E9E8  34 7B 31 30   pop      0x17B34  xr0
-//   E9EC  01 30 0C EA             data    01 30 0C EA
-std::string build_listing(const std::vector<uint8_t>& bytes, const std::vector<ChainRow>& rows,
-                           uint32_t base) {
-    std::string s;
-    char addr[16];
-    size_t i = 0, r = 0;
-    while (i < bytes.size()) {
-        if (r < rows.size() && rows[r].offset == i) {
-            const ChainRow& g = rows[r];
-            std::snprintf(addr, sizeof addr, "%04X", base + (uint32_t)i);
-            std::string kind = kind_name(g.kind);
-            while (kind.size() < 9) kind += ' ';
-            char ga[16];
-            std::snprintf(ga, sizeof ga, "0x%05X", g.addr);
-            s += std::string(addr) + "  " + hex_bytes_compact(&bytes[i], 4) + "   " + kind + ga +
-                 "  " + g.name + "\n";
-            i += 4;
-            r++;
-            continue;
-        }
-        // Plain data (arguments, string pool, ...): up to four bytes per row.
-        size_t n = 4;
-        if (r < rows.size() && rows[r].offset > i) n = std::min(n, rows[r].offset - i);
-        n = std::min(n, bytes.size() - i);
-        std::snprintf(addr, sizeof addr, "%04X", base + (uint32_t)i);
-        std::string col = hex_bytes_compact(&bytes[i], n);
-        while (col.size() < 11) col += ' ';
-        s += std::string(addr) + "  " + col + "             data    " +
-             hex_bytes_compact(&bytes[i], n) + "\n";
-        i += n;
-    }
-    return s;
-}
+// ---------------------------------------------------------------- asm listing
 
 // ---------------------------------------------------------------- key tables
 // A cmp_ea table is a list of (16 bit key, 16 bit target) entries.  The
@@ -800,10 +734,20 @@ struct Emitter {
     std::map<std::string, uint32_t> alloc;
     uint32_t next_alloc = 0xE800;
     std::map<std::string, size_t> labels;
+    std::set<std::string> explicit_labels;  // source labels, for duplicate detection
     std::vector<std::pair<size_t, std::string>> patches;
     std::vector<std::pair<size_t, std::vector<uint8_t>>> str_pool;
+    std::map<size_t, std::string> str_text;   // pointer position -> source text
+    std::map<size_t, uint32_t> key_words;     // key table offset -> KI/KO word
     std::vector<ChainRow> rows;      // the chain, for the low level listing
     std::vector<KeyTable> key_tables;
+    // Names the listing prints with `lbl`: key tables, string pool entries and
+    // the getkey() slots.  The offset is relative to the payload.
+    std::map<size_t, std::string> data_labels;
+    std::map<size_t, std::string> data_comments;
+    size_t str_start = 0;    // first string-pool byte
+    size_t pad_start = 0;    // first null-buffer byte
+    int slot_count = 0;
     uint32_t home = 0xE9E0;
     uint32_t data_home = 0xE9E0;
     int pad_size = 256;
@@ -982,6 +926,7 @@ struct Emitter {
         size_t sp = out.size();
         out.push_back(0); out.push_back(0);
         str_pool.push_back({sp, enc});
+        str_text[sp] = args[ti]->s;
         log += "  ; " + std::string(small ? "print_small" : "print") + " \"" + args[ti]->s + "\" " +
                (small ? "font=0x" : "pad=0x") + hex2(a) + " linepos=0x" + hex2(b) + " -> " + found + "\n";
         call(found);
@@ -1077,24 +1022,70 @@ struct Emitter {
     // KI/KO word for keytable().
     void emit_getkey(const StmtP& s) {
         if (!s->args.empty()) {
-            report_error(s->name + " takes no arguments; the compiler owns its inline KI/KO slot", "E101");
+            report_error(s->name + " takes no arguments", "E101");
             return;
         }
-        // The write gadget ends in `rt`; LR must be valid.  A preceding
-        // print/render BL may have clobbered the LR set by the preamble.
+        if (db.model == "580") {
+            // Clear the inline slot at run time before every read.  getkey /
+            // getscancode leave [ER0] unchanged when no key is down, so a
+            // compile-time zero alone would re-dispatch the previous key in a
+            // loop.  Exact block (also documented in docs/ROP.md):
+            //     setlr
+            //     pop xr0                 ; ER0 = slot address, ER2 = 0
+            //     <slot>, 0000
+            //     [er0]=er2,rt
+            //     pop er0                 ; ER0 = slot address
+            //     <slot>
+            //     getkey  (2:F5EA, BL ENTER) / getscancode (1:F24E)
+            //     setlr
+            //     pop er0                 ; load the word just written
+            //     slot: 00 00
+            const std::string name = lower(s->name);
+            const std::string gc = name == "getscancode" ? "getscancode" : "getkey";
+            call("setlr");
+            call("pop xr0");
+            const size_t zero_pos = out.size();
+            out.push_back(0);
+            out.push_back(0);
+            out.push_back(0);
+            out.push_back(0);
+            call("[er0]=er2,rt");
+            call("pop er0");
+            const size_t addr_pos = out.size();
+            out.push_back(0);
+            out.push_back(0);
+            call(gc);
+            call("setlr");
+            call("pop er0");
+            const size_t slot_pos = out.size();
+            out.push_back(0x00);
+            out.push_back(0x00);
+            key_slot = home + (uint32_t)slot_pos;
+            has_key_slot = true;
+            out[zero_pos] = (uint8_t)(key_slot & 0xFF);
+            out[zero_pos + 1] = (uint8_t)((key_slot >> 8) & 0xFF);
+            out[addr_pos] = (uint8_t)(key_slot & 0xFF);
+            out[addr_pos + 1] = (uint8_t)((key_slot >> 8) & 0xFF);
+            data_labels[slot_pos] = slot_count++ ? "keyslot_" + std::to_string(slot_count) : "keyslot";
+            log += "  ; " + name + " -> inline slot [" + hex4(key_slot) +
+                   "] (cleared before read)\n";
+            return;
+        }
+        // 880: clear the inline slot, write KI/KO, then reload the value.
         call("setlr");
         call("pop xr0");
         const size_t zero_pos = out.size();
         out.push_back(0);
         out.push_back(0);
-        out.push_back(0);   // ER2 = 0
+        out.push_back(0);
         out.push_back(0);
         call("[er0]=er2,rt");
         call("pop er0");
         const size_t addr_pos = out.size();
         out.push_back(0);
         out.push_back(0);
-        const std::string gc = lower(s->name) == "getscancode" ? "getscancode" : "getkey";
+        const std::string name = lower(s->name);
+        const std::string gc = name == "getscancode" ? "getscancode" : "getkey";
         call(gc);
         call("setlr");
         call("pop er0");
@@ -1107,8 +1098,9 @@ struct Emitter {
         out[zero_pos + 1] = (uint8_t)((key_slot >> 8) & 0xFF);
         out[addr_pos] = (uint8_t)(key_slot & 0xFF);
         out[addr_pos + 1] = (uint8_t)((key_slot >> 8) & 0xFF);
-        log += "  ; " + std::string(s->name) + " -> inline KI/KO slot [" +
-               hex4(key_slot) + "] (cleared before read)\n";
+        data_labels[slot_pos] = slot_count++ ? "keyslot_" + std::to_string(slot_count) : "keyslot";
+        log += "  ; " + name + " -> inline KI/KO slot [" + hex4(key_slot) +
+               "] (cleared before read)\n";
     }
     // keytable(0x0480, up, 0x0840, down, ..., 0x0000, loop)
     //
@@ -1135,6 +1127,19 @@ struct Emitter {
         for (size_t i = 0; i < args.size(); i += 2) {
             KeyTableEntry e;
             e.key = (uint16_t)eval(args[i], log);
+            // getkey() returns raw KI/KO words; accept the FCxx key IDs too so
+            // tables written either way dispatch the same key.
+            if (db.model == "580") {
+                // ROM table bank0 0x7B0E/0x83DA: FC1C=UP 0x0480,
+                // FC1D=DOWN 0x0840, FC1E=RIGHT 0x0880, FC1F=LEFT 0x0440.
+                switch (e.key) {
+                case 0xFC1C: e.key = 0x0480; break;   // UP
+                case 0xFC1D: e.key = 0x0840; break;   // DOWN
+                case 0xFC1E: e.key = 0x0880; break;   // RIGHT
+                case 0xFC1F: e.key = 0x0440; break;   // LEFT
+                default: break;
+                }
+            }
             if (args[i + 1]->k != Expr::Var && args[i + 1]->k != Expr::Str) {
                 report_error("keytable target must be a label", "E101");
                 return;
@@ -1147,15 +1152,23 @@ struct Emitter {
             log += "  ; warning [W004]: keytable without a getkey(); ER0 is not a scancode\n";
         if (!has_default)
             log += "  ; warning [W005]: keytable has no 0x0000 default entry\n";
-        // ER0 was loaded by getkey(); only the table address still has to be
-        // put into EA.  Do not emit another pop er0 here: that would load the
-        // slot address instead of the KI/KO value.
+        // ER0 holds the key id returned by getkey(); only the table address
+        // still has to be put into EA.
         call("pop ea");
         table.addr_pos = out.size();
         out.push_back(0);
         out.push_back(0);
         call("cmp_ea");
         call("er6 = [ea]");
+        // The key handler returns through LEAVE, so LR is not the chain's
+        // POP PC by the time the branch target starts.  The community .rsc
+        // re-arms LR and disables interrupts before the branch:
+        // setlr_pc; di,rt; sp=er6,pop er8.  getkey() re-enables them.
+        // TODO(real-device): the proposal also suggests di,rt (0A05C) before
+        // sp=er6,pop er8.  Keep the current setlr-only flow until a device
+        // test confirms the interrupt state; the ea_switchcase example and
+        // earlier commits deliberately keep interrupts on.  See docs/ROP.md.
+        call("setlr");
         call("sp=er6,pop er8");
         log += "  ; keytable: " + std::to_string(table.entries.size()) + " entries\n";
         for (const auto& e : table.entries)
@@ -1309,6 +1322,7 @@ struct Emitter {
                 if (key == "rect" || key == "draw_rect") { emit_rect(s); return; }
                 if (key == "bitmap" || key == "draw_bitmap") { emit_bitmap(s); return; }
                 if (key == "getkey" || key == "get_key" || key == "key" ||
+                    key == "getkeycode" || key == "get_keycode" ||
                     key == "getscancode_nodelay" || key == "getscancode") { emit_getkey(s); return; }
                 if (key == "keytable" || key == "table") { emit_keytable(s); return; }
                 if (key == "delay" || key == "sleep") { emit_delay(s); return; }
@@ -1368,11 +1382,23 @@ struct Emitter {
                 return;
             }
             case Stmt::Goto: jump_label(s->name, "goto " + s->name); return;
-            case Stmt::Label: labels[s->name] = out.size(); log += "; " + s->name + "\n"; return;
+            case Stmt::Label:
+                if (!explicit_labels.insert(s->name).second) {
+                    report_error("duplicate label '" + s->name + "'", "E107");
+                    return;
+                }
+                labels[s->name] = out.size();
+                log += "; " + s->name + "\n";
+                return;
             case Stmt::Asm:
                 for (auto& l : s->asm_lines) {
                     log += "  ; asm " + l + "\n";
                     std::string k = lower(l);
+                    // A raw asm getkey also leaves a key word in ER0, so a
+                    // following keytable() should not warn W004.
+                    if (k.find("getkey") != std::string::npos ||
+                        k.find("getkeycode") != std::string::npos)
+                        has_key_slot = true;
                     uint32_t a = 0; std::string f;
                     if (find_addr(k, a, f)) { call(k); continue; }
                     if (k.rfind("0x", 0) == 0 || k.rfind("hex ", 0) == 0) {
@@ -1388,6 +1414,190 @@ struct Emitter {
     }
     static std::string hex4(uint32_t v) { char b[8]; std::snprintf(b, sizeof b, "%04X", v); return b; }
     static std::string hex2(uint32_t v) { char b[8]; std::snprintf(b, sizeof b, "%02X", v & 0xFF); return b; }
+    static std::string hex5(uint32_t v) { char b[8]; std::snprintf(b, sizeof b, "%05X", v); return b; }
+    static std::string lhex4(uint32_t v) {
+        std::string s = hex4(v);
+        for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+        return s;
+    }
+    static std::string byte_hex(uint8_t v) {
+        char b[4]; std::snprintf(b, sizeof b, "%02x", v); return b;
+    }
+    // The raw KI/KO word of a key table entry, spelled the way the hand
+    // written sources spell it.
+    static std::string key_name(uint32_t key) {
+        switch (key) {
+            case 0x0480: return "KEY_UP";
+            case 0x0840: return "KEY_DOWN";
+            case 0x0440: return "KEY_LEFT";
+            case 0x0880: return "KEY_RIGHT";
+            default: break;
+        }
+        return std::string();
+    }
+
+    // ------------------------------------------------------------ asm listing
+    // The .asm listing is written in the community "wiz rop dsl" source style:
+    //
+    //   section.main
+    //   org 0xd730
+    //   backup 0xe9e0
+    //
+    //   lbl main
+    //       setlr
+    //       setsfr
+    //       pop xr0
+    //       hex 01 30
+    //       eval(adr(str_1)+dist.main)
+    //       printline
+    //       render
+    //   ...
+    //   lbl keytable_1
+    //       KEY_UP
+    //       adr(up) - 2
+    //
+    // Gadget words keep their mnemonic, data stays `hex`, and a data word that
+    // is a known address is printed as `adr(label)` / `adr(label) - 2` (code
+    // targets) or `eval(adr(label)+dist.main)` (string-pool pointers), which
+    // is the spelling the hand written ROP sources use.
+    std::string asm_listing() const {
+        // Best label name for each payload offset.
+        auto is_generated = [](const std::string& n) {
+            return n.rfind("loop_", 0) == 0 || n.rfind("end_", 0) == 0 ||
+                   n.rfind("for_", 0) == 0;
+        };
+        std::map<size_t, std::string> at;
+        for (const auto& kv : labels) {
+            auto it = at.find(kv.second);
+            if (it == at.end()) { at[kv.second] = kv.first; continue; }
+            const bool gen_new = is_generated(kv.first), gen_old = is_generated(it->second);
+            if (gen_new != gen_old ? gen_old : kv.first.size() < it->second.size())
+                it->second = kv.first;
+        }
+        for (const auto& kv : data_labels) {
+            if (!at.count(kv.first)) at[kv.first] = kv.second;
+        }
+
+        // Values whose data word is an address of a label.  Code lives at
+        // home; the string pool is referenced through the injected copy.
+        std::map<uint32_t, std::string> expr;
+        auto add_expr = [&](uint32_t v, const std::string& e) { expr.emplace(v, e); };
+        for (const auto& kv : at) {
+            const size_t off = kv.first;
+            const std::string& name = kv.second;
+            if (off < str_start) {
+                add_expr(home + (uint32_t)off, "adr(" + name + ")");
+                if (off >= 2) add_expr(home + (uint32_t)off - 2, "eval(adr(" + name + ") - 2)");
+            } else {
+                add_expr(data_home + (uint32_t)off, "eval(adr(" + name + ")+dist.main)");
+            }
+        }
+        auto word_at = [&](size_t p) -> uint32_t {
+            return (uint32_t)out[p] | ((uint32_t)out[p + 1] << 8);
+        };
+
+        // Chain words by offset, for the walk below.
+        std::map<size_t, const ChainRow*> row_at;
+        for (const auto& r : rows) row_at[r.offset] = &r;
+
+        std::string s;
+        s += "# wiz rop asm listing\n";
+        s += "# payload " + std::to_string(out.size()) + " bytes, injected @ " + hex4(data_home) +
+             ", executed @ " + hex4(home) + " (dist.main = " + hex4(data_home - home) + ")\n";
+        s += "@section.main at 0x" + lhex4(home) + " backup 0x" + lhex4(data_home) + "\n\n";
+
+        auto line = [&](const std::string& text, const std::string& comment) {
+            std::string l = "    " + text;
+            if (!comment.empty()) {
+                while (l.size() < 28) l += ' ';
+                l += " # " + comment;
+            }
+            return l + "\n";
+        };
+
+        size_t i = 0;
+        while (i < out.size()) {
+            if (pad_size > 0 && i == pad_start) {
+                s += "lbl pad\n";
+                // Every byte has to be written out: the listing is meant to be
+                // fed back into the assembler, and the null buffer is part of
+                // the payload.
+                for (size_t k = 0; k < (size_t)pad_size; k += 8) {
+                    s += "    hex";
+                    for (size_t m = k; m < std::min<size_t>(k + 8, (size_t)pad_size); ++m)
+                        s += " 00";
+                    if (k + 8 >= (size_t)pad_size)
+                        s += "   # " + std::to_string(pad_size) + " zero bytes";
+                    s += "\n";
+                }
+                break;
+            }
+            auto la = at.find(i);
+            if (la != at.end()) {
+                s += "lbl " + la->second + "\n";
+                auto cm = data_comments.find(i);
+                if (cm != data_comments.end() && !cm->second.empty())
+                    s += "    #" + cm->second + "\n";
+            }
+            auto ra = row_at.find(i);
+            if (ra != row_at.end()) {
+                const ChainRow& g = *ra->second;
+                std::string mn;
+                switch (g.kind) {
+                    case GKind::Pop: mn = "pop " + g.name; break;
+                    case GKind::SetlrPc: mn = "setlr_pc"; break;
+                    default: mn = g.name; break;
+                }
+                if (mn.empty()) mn = "call 0x" + hex5(g.addr);
+                s += line(mn, hex5(g.addr));
+                i += 4;
+                continue;
+            }
+            // Plain data: stop at the next gadget or label.
+            size_t limit = out.size();
+            if (pad_size > 0 && pad_start > i) limit = std::min(limit, pad_start);
+            auto nr = row_at.upper_bound(i);
+            if (nr != row_at.end()) limit = std::min(limit, nr->first);
+            auto nl = at.upper_bound(i);
+            if (nl != at.end()) limit = std::min(limit, nl->first);
+            if (limit > i + 2 && limit - i > 8) limit = i + 8;
+            // A key table entry's KI/KO word: raw bytes, with the community
+            // key name as a comment.  The hex keeps the listing byte exact
+            // even when the assembler's KEY_xx values are unknown.
+            auto kw = key_words.find(i);
+            if (kw != key_words.end() && i + 2 <= limit) {
+                const std::string kn = key_name(kw->second);
+                if (!kn.empty()) {
+                    s += line("hex " + byte_hex(out[i]) + " " + byte_hex(out[i + 1]), kn);
+                    i += 2;
+                    continue;
+                }
+            }
+            // A whole annotated address word.
+            if (i + 2 <= limit) {
+                auto e = expr.find(word_at(i));
+                if (e != expr.end()) {
+                    s += line(e->second, hex4(word_at(i)));
+                    i += 2;
+                    continue;
+                }
+            }
+            size_t n = 1;
+            while (n < limit - i) {
+                if (n % 2 == 0 && n + 2 <= limit - i && expr.count(word_at(i + n))) break;
+                n++;
+            }
+            s += "    hex";
+            for (size_t k = 0; k < n; k++) s += " " + byte_hex(out[i + k]);
+            s += "\n";
+            i += n;
+        }
+        // Labels that point at the end of the payload.
+        for (auto it = at.lower_bound(i); it != at.end(); ++it)
+            s += "lbl " + it->second + "\n";
+        return s;
+    }
+
     RopResult run(const Program& prog) {
         RopResult r;
         home = prog.has_org ? prog.org : 0xE9E0;
@@ -1401,8 +1611,25 @@ struct Emitter {
                 has_sfr_setup = has_sfr_setup || n == "setsfr";
             }
         }
+        // Names must be unique: a second global would silently share the first
+        // one's address, and a second function would shadow the first body.
+        {
+            std::set<std::string> seen_globals;
+            for (const auto& g : prog.globals)
+                if (!seen_globals.insert(g.name).second)
+                    report_error("duplicate global '" + g.name + "'", "E109");
+            std::set<std::string> seen_funcs;
+            for (const auto& f : prog.funcs)
+                if (!f.name.empty() && !seen_funcs.insert(f.name).second)
+                    report_error("duplicate function '" + f.name + "'", "E110");
+        }
         // This is the exact hdcompiler/RAC preamble.  setlr_pc is a different
         // gadget and does not reproduce the working RAC chain's startup.
+        // The first function starts at offset 0, so its label goes before the
+        // injected preamble and the listing shows `lbl main` at the section
+        // start, like the community sources.
+        if (!prog.funcs.empty() && !labels.count(prog.funcs.front().name))
+            labels[prog.funcs.front().name] = out.size();
         if (!has_lr_setup) call("setlr");
         if (!has_sfr_setup) call("setsfr");
         for (auto& g : prog.globals) {
@@ -1414,6 +1641,7 @@ struct Emitter {
         }
         for (auto& f : prog.funcs) {
             log += "; func " + f.name + "\n";
+            if (!labels.count(f.name)) labels[f.name] = out.size();
             for (auto& s : f.body) stmt(s);
         }
         call("brk"); // halt after main: without it the chain runs into the
@@ -1421,12 +1649,15 @@ struct Emitter {
         // Append cmp_ea tables.  They are part of the payload and the launcher
         // copies them together with the code, so their addresses use the
         // execution address (home), just like the community `adr_of table`.
-        for (auto& t : key_tables) {
+        for (size_t ti = 0; ti < key_tables.size(); ++ti) {
+            auto& t = key_tables[ti];
             const uint32_t base = home + (uint32_t)out.size();
             out[t.addr_pos] = (uint8_t)(base & 0xFF);
             out[t.addr_pos + 1] = (uint8_t)((base >> 8) & 0xFF);
             log += "  ; keytable @ [" + hex4(base) + "]\n";
+            data_labels[out.size()] = "keytable_" + std::to_string(ti + 1);
             for (const auto& e : t.entries) {
+                key_words[out.size()] = e.key;
                 emit_le(e.key, 2);
                 size_t pos = out.size();
                 out.push_back(0);
@@ -1435,18 +1666,27 @@ struct Emitter {
             }
         }
         // append string pool
-        for (auto& sp : str_pool) {
+        str_start = out.size();
+        for (size_t si = 0; si < str_pool.size(); ++si) {
+            auto& sp = str_pool[si];
             size_t off = out.size();
             out.insert(out.end(), sp.second.begin(), sp.second.end());
             uint32_t target = data_home + (uint32_t)off;
             out[sp.first] = (uint8_t)(target & 0xFF);
             out[sp.first + 1] = (uint8_t)((target >> 8) & 0xFF);
             log += "  ; str pool -> [" + hex4(target) + "] " + std::to_string(sp.second.size()) + " bytes\n";
+            data_labels[off] = "str_" + std::to_string(si + 1);
+            auto txt = str_text.find(sp.first);
+            if (txt != str_text.end()) data_comments[off] = " \"" + txt->second + "\"";
         }
         // patch gotos
         for (auto& p : patches) {
             auto it = labels.find(p.second);
-            if (it == labels.end()) { log += "  ; warning: label " + p.second + " not found\n"; continue; }
+            if (it == labels.end()) {
+                report_error("undefined label '" + p.second + "' (used by goto or keytable)",
+                             "E108");
+                continue;
+            }
             uint32_t target = home + (uint32_t)it->second;
             // "sp = er6, pop er8" (and the other branch gadgets) load PC from
             // the stored word after pre-incrementing the stack pointer, so a
@@ -1465,19 +1705,30 @@ struct Emitter {
         // 256 bytes is the default; `#pad N` sets another size and `#nopad`
         // turns the buffer off.
         if (pad_size > 0) {
+            pad_start = out.size();
             out.insert(out.end(), (size_t)pad_size, (uint8_t)0);
             log += "  ; null buffer: " + std::to_string(pad_size) + " bytes\n";
         }
         r.ok = !failed;
         if (failed) r.error = first_error.empty() ? "ROP compilation failed" : first_error;
+        // The source-style listing comes first, the notes follow.  It has to
+        // be built before `out` is moved into the result.
+        const std::string listing = asm_listing();
         r.bytes = std::move(out);
         r.base = home;
-        // The low level view of the chain comes first, the notes follow.
-        std::string listing = build_listing(r.bytes, rows, data_home);
-        if (home != data_home)
-            listing = "; payload injected at " + hex4(data_home) + ", executed at " + hex4(home) + "\n" + listing;
         r.log = listing;
-        if (!log.empty()) r.log += log;
+        if (!log.empty()) {
+            // The notes are comments in the same source: `#`, not `;`.
+            std::string notes;
+            std::istringstream in(log);
+            std::string line;
+            while (std::getline(in, line)) {
+                const size_t k = line.find_first_not_of(" \t");
+                if (k != std::string::npos && line[k] == ';') line[k] = '#';
+                notes += line + "\n";
+            }
+            r.log += "\n# ---- notes ----\n" + notes;
+        }
         return r;
     }
 };
@@ -1496,19 +1747,34 @@ struct LauncherOpts {
     bool has_main = false;
 };
 
-uint32_t parse_number(std::string a) {
-    if (!a.empty() && a.front() == '[') a.erase(a.begin());
-    if (!a.empty() && a.back() == ']') a.pop_back();
-    if (a.rfind("0x", 0) == 0 || a.rfind("0X", 0) == 0) a = a.substr(2);
-    return (uint32_t)std::strtoul(a.c_str(), nullptr, 16);
+[[noreturn]] void directive_error(int line_no, const std::string& name,
+                                  const std::string& msg, const std::string& code) {
+    throw std::runtime_error(fmt("line %d: #%s: %s [%s]", line_no, name.c_str(), msg.c_str(),
+                                 code.c_str()));
 }
 
-uint32_t parse_length(std::string a) {
+uint32_t directive_u32(int line_no, const std::string& name, const std::string& text,
+                       bool allow_bare_hex) {
+    unsigned long v = 0;
+    std::string err;
+    if (!parse_directive_number(text, v, err, allow_bare_hex))
+        directive_error(line_no, name, err, "preproc.directive-argument");
+    if (v > 0xFFFFu)
+        directive_error(line_no, name, "value does not fit in 16 bits",
+                        "preproc.directive-argument");
+    return (uint32_t)v;
+}
+
+uint32_t parse_length(int line_no, const std::string& a) {
     const std::string l = lower(a);
     if (l == "short" || l == "small") return 1;
     if (l == "medium" || l == "mid") return 2;
     if (l == "long" || l == "large") return 3;
-    return parse_number(a) & 0xFF;
+    uint32_t v = directive_u32(line_no, "launcher", a, false);
+    if (v < 1 || v > 3)
+        directive_error(line_no, "launcher", "length must be short, medium, long, 1, 2 or 3",
+                        "preproc.directive-argument");
+    return v;
 }
 
 std::string strip_directives(std::string src, std::string& model, uint32_t& org, bool& has_org,
@@ -1516,27 +1782,69 @@ std::string strip_directives(std::string src, std::string& model, uint32_t& org,
     std::string out;
     std::istringstream in(src);
     std::string line;
+    int lineno = 0;
     while (std::getline(in, line)) {
+        ++lineno;
         size_t i = line.find_first_not_of(" \t");
         if (i != std::string::npos && line[i] == '#') {
-            std::istringstream ls(line.substr(i + 1));
-            std::string d; ls >> d;
-            std::string dlow = lower(d);
+            std::string text = line.substr(i + 1);
+            const size_t comment = text.find("//");
+            if (comment != std::string::npos) text = text.substr(0, comment);
+            std::istringstream ls(text);
+            std::string d;
+            ls >> d;
+            const std::string dlow = lower(d);
+            const DirectiveInfo* info = find_directive(dlow, DirectiveContext::Rop);
+            if (!info) {
+                std::string hit = closest_match(dlow, directive_names(DirectiveContext::Rop));
+                std::string hint =
+                    hit.empty() ? std::string() : " (did you mean '#" + hit + "'?)";
+                directive_error(lineno, d,
+                                "unknown ROP directive '#" + d + "'" + hint,
+                                "preproc.unknown-directive");
+            }
             if (dlow == "for") {
-                std::string m; ls >> m;
-                std::string ml = lower(m);
-                if (ml == "580" || ml == "580vnx" || ml == "fx-580vn" ) model = "580";
-                else if (ml == "880" || ml == "880btg") model = "880";
+                std::string m;
+                if (!(ls >> m))
+                    directive_error(lineno, d, "expected a target (580 or 880)",
+                                    "preproc.directive-argument");
+                std::string canon;
+                if (!canonical_target_name(m, canon))
+                    directive_error(lineno, d, "unknown target '" + m + "' (use 580 or 880)",
+                                    "preproc.directive-argument");
+                std::string extra;
+                if (ls >> extra)
+                    directive_error(lineno, d, "only one target is allowed in a ROP source",
+                                    "preproc.directive-argument");
+                model = canon;
             } else if (dlow == "org") {
-                std::string a; ls >> a;
-                org = parse_number(a);
+                std::string a;
+                if (!(ls >> a))
+                    directive_error(lineno, d, "expected an address",
+                                    "preproc.directive-argument");
+                org = directive_u32(lineno, d, a, true);
                 has_org = true;
+                std::string extra;
+                if (ls >> extra)
+                    directive_error(lineno, d, "unexpected text after the address",
+                                    "preproc.directive-argument");
             } else if (dlow == "pad" || dlow == "nopad") {
                 if (dlow == "nopad") {
+                    std::string extra;
+                    if (ls >> extra)
+                        directive_error(lineno, d, "#nopad takes no argument",
+                                        "preproc.directive-argument");
                     pad = 0;
                 } else {
-                    std::string a; ls >> a;
-                    if (!a.empty()) pad = (int)parse_number(a);
+                    std::string a;
+                    if (!(ls >> a))
+                        directive_error(lineno, d, "expected a size",
+                                        "preproc.directive-argument");
+                    pad = (int)directive_u32(lineno, d, a, false);
+                    std::string extra;
+                    if (ls >> extra)
+                        directive_error(lineno, d, "unexpected text after the size",
+                                        "preproc.directive-argument");
                 }
             } else if (dlow == "launcher") {
                 std::string a;
@@ -1549,22 +1857,30 @@ std::string strip_directives(std::string src, std::string& model, uint32_t& org,
                     } else if (al == "simple" || al == "stub") {
                         lopts.kind = LauncherKind::Simple;
                     } else {
-                        // Backwards compatible: `#launcher 8154` places the
-                        // simple stub at that address.
+                        // Legacy: `#launcher 8154` places the simple stub.
                         lopts.kind = LauncherKind::Simple;
-                        lopts.base = parse_number(a);
+                        lopts.base = directive_u32(lineno, d, a, true);
                         lopts.has_base = true;
                     }
                 }
                 if (lopts.kind == LauncherKind::Common) {
                     std::string v;
-                    if (ls >> v) { lopts.length = parse_length(v); lopts.has_length = true; }
-                    if (ls >> v) { lopts.backup = parse_number(v); lopts.has_backup = true; }
-                    if (ls >> v) { lopts.main = parse_number(v); lopts.has_main = true; }
+                    if (ls >> v) { lopts.length = parse_length(lineno, v); lopts.has_length = true; }
+                    if (ls >> v) { lopts.backup = directive_u32(lineno, d, v, true); lopts.has_backup = true; }
+                    if (ls >> v) { lopts.main = directive_u32(lineno, d, v, true); lopts.has_main = true; }
                 } else {
                     std::string v;
-                    if (ls >> v) { lopts.base = parse_number(v); lopts.has_base = true; }
+                    if (ls >> v) { lopts.base = directive_u32(lineno, d, v, true); lopts.has_base = true; }
                 }
+                std::string extra;
+                if (ls >> extra)
+                    directive_error(lineno, d, "unexpected text after the launcher options",
+                                    "preproc.directive-argument");
+            } else if (dlow == "rop") {
+                std::string extra;
+                if (ls >> extra)
+                    directive_error(lineno, d, "#rop takes no argument",
+                                    "preproc.directive-argument");
             }
             out += "\n";
             continue;
@@ -1848,7 +2164,7 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
                              std::to_string(copy_len) + " bytes, payload is " +
                              std::to_string(r.bytes.size()) + " bytes)\n";
             }
-            r.log += "  ; launcher (" + std::string(r.model == "880" ? "880 common" : "580 common") +
+            r.log += "  # launcher (" + std::string(r.model == "880" ? "880 common" : "580 common") +
                      ") " + std::to_string(r.launcher.size()) + " bytes\n";
         } else {
             // Simple 10-byte stub: pop er14 / payload-2 / sp = er14, pop er14.
@@ -1866,7 +2182,7 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
             emit_gadget(r.launcher, pop_er14);
             emit16(r.launcher, (r.base >= 2 ? r.base - 2 : r.base) & 0xFFFF);
             emit_gadget(r.launcher, set_sp);
-            r.log += "  ; launcher (simple) " + std::to_string(r.launcher.size()) + " bytes\n";
+            r.log += "  # launcher (simple) " + std::to_string(r.launcher.size()) + " bytes\n";
         }
         if (!missing_gadget.empty()) {
             r.ok = false;
@@ -1878,7 +2194,7 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
         std::snprintf(hb, sizeof hb, "%04X", r.launcher_base);
         char pb[16];
         std::snprintf(pb, sizeof pb, "%04X", r.base);
-        r.log += std::string("  ; launcher @ ") + hb + " -> [" + pb + "]\n";
+        r.log += std::string("  # launcher @ ") + hb + " -> [" + pb + "]\n";
         return r;
     } catch (const std::exception& e) {
         RopResult bad;
