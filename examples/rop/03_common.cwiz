@@ -1,7 +1,7 @@
 // rop/03_common.cwiz — two print calls on different lines.
 #rop
 #for 580
-#org E9E0
+#org 0xE9E0
 #launcher common
 
 int main() {

@@ -2,7 +2,7 @@
 // Prints "HELLO ROP" on line 1.
 #rop
 #for 580
-#org E9E0
+#org 0xE9E0
 #launcher common
 
 int main() {

@@ -1,7 +1,7 @@
 // rop/02_line.cwiz — draw diagonal + label.
 #rop
 #for 580
-#org E9E0
+#org 0xE9E0
 #launcher common
 
 int main() {

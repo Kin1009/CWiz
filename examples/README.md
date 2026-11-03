@@ -12,6 +12,7 @@ for the smaller status-icon region. Nothing appears until the relevant render ca
 | **shapes** | `shapes/02_shapes.cwiz` | Drawing primitives (`rect`, `fillrect`, `circle`, `disc`, `line`). |
 | **text** | `text/01_text_demo.cwiz` | Native 6x8 CW font (`print`, `text`). |
 | **text** | `text/02_cw_font.cwiz`, `text/03_cw_font.cwiz` | ClassWiz CW Display font at 1x (`print_cw`, `text_cw`, `num_cw`). |
+| **vietnamese** | `vietnamese/01_compile_time.cwiz` … `04_mixed_accented.cwiz` | Vietnamese on the CW Display: `__normalized__`, runtime `normalizeText()`, explicit F4 bytes, mixed ASCII. |
 | **input** | `input/01_keys.cwiz`, `input/02_pong.wz` | Key echo; Pong game (`flip()` per frame). |
 | **arrays** | `arrays/01_arrays.cwiz` | `rom8` / `rom int`; bar chart pattern. |
 | **math** | `math/01_math.cwiz`, `math/02_demo.wz` | Arithmetic with clamped ranges; fibonacci/factorial demo. |
@@ -20,7 +21,7 @@ for the smaller status-icon region. Nothing appears until the relevant render ca
 | **showcase** | `showcase/01_example_showcase.cwiz`, `showcase/01_example_showcase.wz` | Interactive tour: arrays, helpers, math, keys, shapes, sprites, fonts, status, rendering. |
 | **cwapp** | `cwapp/01_cwapp.cwiz`, `cwapp/02_app_hello.wz` | Full patched ROM (`#cwapp`, `#org`, `#for 580`). |
 | **580/880** | `580_880/01_target.cwiz` | Target-independent; 190x63 (580, 1 bp) or 192x64 (880, 2 bp). |
-| **rop** | `rop/01_hello.cwiz` … `rop/05_hello_wiz.wz` | CWiz- and Wiz-syntax ROP payloads (`#rop`, `#org E9E0`, `#launcher common`). |
+| **rop** | `rop/01_hello.cwiz` … `rop/07_rop_guide.cwiz` | CWiz- and Wiz-syntax ROP payloads (`#rop`, `#org 0xE9E0`, `#launcher common`). `04_keys`/`06_rop_keys` show `getkey()` + `keytable()`; `07_rop_guide` combines SHIFT waits, Vietnamese text, bitmap, line and key dispatch; `08_key_asm` writes the getkey chain with raw `asm { }` blocks. |
 
 ## Shadow buffer
 
@@ -38,6 +39,11 @@ for the smaller status-icon region. Nothing appears until the relevant render ca
   baselines (e.g. `y = 2, 16, 30, 44`).
 - Wiz one-char helper: `char_cw`; CWiz: `glyph_cw`.
 - The 2.4 KB `_cw_font` table is included only when a `*_cw` function is referenced.
+- Vietnamese glyphs are stored as `0xF4, <code>` pairs.  `normalizeText()` (or the
+  `__normalized__` declaration modifier) converts UTF-8 source text; the 3.5 KB
+  `_cw_font_vn` table is emitted only when an F4 glyph or `normalizeText()` is used.
+- `print_cw()` at `x = 0` fits at most 17 printable characters (including spaces)
+  per line; wrap longer text with another `print_cw(0, y, ...)` call.
 
 ## Build quick-reference
 
