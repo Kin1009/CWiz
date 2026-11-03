@@ -119,6 +119,7 @@ All coordinates are clipped to the visible screen. `c` is the colour: non-zero d
 | `char_cw(x, y, c)` / `glyph_cw(x, y, c)` | — | Draw one native ClassWiz CW Display character (`11x13`, 1x). Wiz: `char_cw`; CWiz: `glyph_cw`. |
 | `text_cw(x, y, s)` | end `x` | Draw a string with the native CW Display font. |
 | `num_cw(x, y, n)` | end `x` | Draw signed decimal `n` with the native CW Display font. |
+| `normalizeText(s)` | buffer address | Convert a UTF-8 byte string to CW Display F4 bytes in a static 256-byte buffer. |
 | `sprite(x, y, w, h, data)` | — | Draw a 1-bit-per-pixel bitmap; `data` is a `rom8` table (or table + offset). |
 
 CWiz names its glyph helper `glyph` because `char` is a reserved word (it is a type). Wiz names it
@@ -141,15 +142,54 @@ print(4, 4, "Score ", score, " / ", 100)    # -> "Score 42 / 100"
 
 `print_cw(x, y, a, b, c, …)` is the same layout rule using the native ClassWiz CW Display
 (`text_cw`/`num_cw`).  It is a separate set, so the original 6x8 `print()` output is unchanged.
-Both models render it at native 1x: 11 px advance, 12 px cap height, 13-row cell.  The table
-covers printable ASCII (`32..126`); Wiz strings are still byte-based.
+Both models render it at native 1x: 11 px advance, 12 px cap height, 13-row cell.  The base
+table covers printable ASCII (`32..126`); Vietnamese uses the F4 encoding described below.
 
 ```c
 print_cw(2, 2, "ClassWiz CW");        // 11 px per character
 print_cw(2, 16, "score ", score);     // strings and numbers
 ```
 
-Use 14 px between baselines (for example `y = 2, 16, 30, 44`) to leave a one-pixel gap.
+Use 14 px between baselines (for example `y = 2, 16, 30, 44`) to leave a one-pixel gap.  At
+`x = 0` a 192 px line fits at most 17 printable characters (including spaces, 11 px each); wrap
+longer text with another `print_cw(0, y, ...)` call.
+
+### `normalizeText` and Vietnamese
+
+The firmware stores a Vietnamese glyph as two bytes: `0xF4` followed by a column code in
+`0x10..0x95`.  `text_cw()` (and therefore `print_cw()`) consumes the pair as one 11 px glyph.
+The full table is `compiler/fonts/vn_f4.txt`; examples: `ế` = `F4 3A`, `đ` = `F4 80`,
+`Đ` = `F4 60`, `ỵ` = `F4 6C`.
+
+CWiz string literals are UTF-8 byte strings.  Convert them at run time with:
+
+```c
+int normalizeText(int s);              // s is a ROM string address
+print_cw(2, 2, normalizeText("Tiếng Việt"));
+```
+
+The argument is a ROM string address.  The return value is the address of a static 256-byte RAM
+buffer holding NUL-terminated F4 bytes; it is overwritten by the next call.  ASCII bytes are
+copied, known Vietnamese codepoints become `F4,<code>`, an existing F4 pair is passed through,
+and unknown non-ASCII codepoints become `?`.  Input must be precomposed UTF-8 (combining accents
+are not recombined).  Wiz exposes the same function; its buffer is 256 bytes of raw memory.
+Wiz source strings themselves are ASCII-only, so pass a `rom8` byte table containing UTF-8 for
+Vietnamese input.
+
+For a compile-time conversion, prefix a CWiz declaration with `__normalized__`:
+
+```c
+__normalized__ rom8 char greeting[32] = "Xin chào Việt Nam";
+print_cw(2, 2, greeting);
+```
+
+The marker rewrites the string literals on that line to F4 bytes before lexing.  It is not
+available in Wiz.  Either path avoids a separate F4 pair being drawn as two replacement glyphs;
+writing `"\xF4\x51"` by hand works too.
+
+Vietnamese data is only linked when used.  `text_cw()`/`print_cw()` pull in both `_cw_font`
+(ASCII, 2.4 KB) and `_cw_font_vn` (Vietnamese, 3.5 KB); `normalizeText()` alone pulls in the
+codepoint map and the 256-byte buffer but not the glyph tables.
 
 ---
 
@@ -395,11 +435,15 @@ struct CwizPos { std::string file; int line = 0; };
 CwizPos cwiz_error_pos(const std::string& fallback_file, int line);
 ```
 
-`preprocess_cwiz` expands C-style directives (`#define`, `#undef`, `#if`/`#elif`/`#else`/`#endif`,
-`#ifdef`/`#ifndef`, `#include`, `#pragma once`, `#error`), rewrites `#for 580, 880` /
-`#for 880` into the `for …` target-section headers the section filter understands, accepts `#cwapp`
-as the marker for an fx-580VN X firmware-app section, and defines `__CWIZ__`, one of
-`__CW__` / `__CWII__` / `__CWAPP__`, and `__ROWS__`.
+`preprocess_cwiz` expands C-style directives (`#define`, `#undef`, `#if`/`#elif`/`#elifdef`/
+`#elifndef`/`#else`/`#endif`, `#ifdef`/`#ifndef`, `#include`, `#pragma once`, `#error`, `#line`,
+`#embed`, `__has_include`, `__has_c_attribute`), rewrites `#for 580, 880` / `#for 880` into the
+`for …` target-section headers the section filter understands, accepts `#cwapp` as the marker for an
+fx-580VN X firmware-app section, and defines `__CWIZ__`, one of `__CW__` / `__CWII__` / `__CWAPP__`,
+and `__ROWS__`.  The canonical directive grammar (arguments, ordering, aliases) is in
+[DIRECTIVES.md](DIRECTIVES.md); the C language matrix is in [C-CONFORMANCE.md](C-CONFORMANCE.md).
+Freestanding angle includes (`<stdint.h>`, `<stdbool.h>`, `<stddef.h>`, `<limits.h>`, `<string.h>`,
+`<stdalign.h>`, `<stdnoreturn.h>`) resolve to built-in headers; there is no host include path.
 
 The output is **line-preserving** — a directive line becomes an empty line — so errors from later
 stages keep pointing at the line you wrote. `#include` is the exception: `cwiz_line_origin(label)`

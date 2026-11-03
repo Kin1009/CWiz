@@ -153,9 +153,10 @@ table, the runtime, the boot templates and the assembler.
 
 CWiz is a C subset: `{}` blocks, `;` statements, `//` comments, and the types `int`, `char` and
 `void` (all 16-bit at run time — `char` is a spelling, not a distinct width). It has
-`if`/`else`, `while`, `do … while`, C-style `for (init; cond; step)`, `return`, `break`,
-`continue`, the usual arithmetic / bitwise / comparison / logical operators, the ternary `?:`,
-`++`/`--` and compound assignment. Functions support **default arguments**:
+`if`/`else`, `while`, `do … while`, C-style `for (init; cond; step)`, `switch`/`case`/`default`
+(with C fall-through), `return`, `break`, `continue`, the usual arithmetic / bitwise / comparison /
+logical operators, the ternary `?:`, `++`/`--`, compound assignment and `sizeof` (folded at compile
+time). Functions support **default arguments**:
 
 ```c
 int scale(int x, int k = 2) { return x * k; }

@@ -320,12 +320,56 @@ print_cw(2, 16, "score ", 99);
 ```
 
 Use 14 px between lines (`y = 2, 16, 30, 44`) to leave a one-pixel gap below the 13-row cell.
+At `x = 0` the 192 px display fits at most **17 printable characters** per line (including
+spaces; each glyph advances 11 px).  Wrap longer text with another `print_cw(0, y, ...)` call.
 The 2.4 KB table is emitted only when a `*_cw` function is referenced; programs that use only the
 original 6x8 API keep their old size.
 
-The current table covers printable ASCII (`32..126`), matching Wiz's byte-string model.  The
-source font also contains Vietnamese and CJK glyphs, but Wiz strings are still one byte per
-character, so those would need a separate Unicode string extension.
+The base table covers printable ASCII (`32..126`).  Vietnamese is handled by a second table
+(134 glyphs) using the firmware's F4 key encoding.
+
+#### Vietnamese text
+
+A Vietnamese letter is stored as **two bytes**: `0xF4` followed by a column code in
+`0x10..0x95`.  For example `ế` is `F4 3A` and `đ` is `F4 80`.  `text_cw()` and `print_cw()`
+recognise the pair and draw it as one 11 px glyph instead of two ASCII cells.  ASCII bytes are
+unchanged, so Vietnamese and ASCII can be mixed in one string.
+
+CWiz source strings are UTF-8 byte strings.  There are two ways to convert them:
+
+```c
+// 1. compile time: __normalized__ rewrites the literal to F4 bytes
+__normalized__ rom8 char greeting[32] = "Xin chào Việt Nam";
+
+// 2. run time: normalizeText() scans UTF-8 and returns a static buffer
+void main() {
+    clear();
+    print_cw(0, 2, greeting);
+    print_cw(0, 16, normalizeText("Tiếng Việt"));
+    render();
+}
+```
+
+Size an `__normalized__` array one byte larger than the converted text (or append `\0`) so the
+string stays terminated; an unsized array is exactly as long as its bytes.
+
+`normalizeText(s)` takes a ROM string address, reads UTF-8 bytes, and returns the address of a
+static 256-byte RAM buffer (NUL-terminated).  The buffer is overwritten on every call, so copy
+the result if two normalized strings are needed at once.  ASCII is copied, known Vietnamese
+codepoints become `F4,<code>`, an existing `F4,<code>` pair is copied unchanged, and any other
+non-ASCII codepoint becomes `?`.  Input must be precomposed UTF-8; decomposed combining accents
+are not recombined.  `normalizeText()` is also available in Wiz and uses the same map; because Wiz
+source strings are ASCII-only, put UTF-8 bytes in a `rom8` table there.
+
+You can spell the encoding by hand when you want the bytes to be explicit:
+
+```c
+rom8 char viet[6] = "\x56\x69\xF4\x3E\x74";   // "Việt": V i F4 3E t
+text_cw(0, 2, viet);
+```
+
+Both tables are emitted only when used: ASCII (`_cw_font`, 2.4 KB) and Vietnamese
+(`_cw_font_vn`, 3.5 KB).  Programs that never touch `*_cw` keep their old size.
 
 ---
 
@@ -574,7 +618,8 @@ The C-shaped bits:
 - Types are `int`, `char`, `void` (all 16-bit at run time; `char` is a spelling, not a width).
 - Blocks are `{ }`; statements end with `;`; comments start with `//`.
 - Control flow: `if`/`else`, `while`, `do … while`, C-style `for (init; cond; step)`, `break`,
-  `continue`, `return`.
+  `continue`, `return`, and `switch (x) { case C: … default: … }` with C fall-through.
+  `break` leaves the nearest loop *or* switch; `continue` always targets the nearest loop.
 - Declarations:
   ```c
   const int W = 192, H = 64;
@@ -597,16 +642,30 @@ The C-shaped bits:
   `extern` and `inline` are accepted but ignored (every value is 16-bit), and
   `bool` is an alias for `int` (`true`/`false` are keywords).  `int a[];`
   without an initialiser and local `const` are rejected with a targeted error.
-- Expressions include the ternary `?:`, `&&`/`||`/`!`, `++`/`--` and compound assignment
-  (`+=`, `<<=`, …). Character literals are written `'A'`.
-- `_ROWS` and the target's `K_*` key constants are injected as predefined constants.
+- Expressions include the ternary `?:`, `&&`/`||`/`!`, `++`/`--`, compound assignment
+  (`+=`, `<<=`, …) and `sizeof`, which is folded at compile time:
+  ```c
+  int a[4];
+  int bytes = sizeof(a);      // 8: the whole array
+  int word  = sizeof(int);    // 2
+  int ptr   = sizeof(char*);  // 2
+  ```
+  Character literals are written `'A'`.
+- Function pointers (`int (*fp)(int)`), typedefs of function pointers, and
+  indirect calls (`fp(x)`) work; variadic functions use `<stdarg.h>`
+  (`va_start`, `va_arg`, `va_end`).
+- `_ROWS`, `_ROW_OFF` and the target's `K_*` key constants are injected as predefined constants.
+- The prelude also provides `strlen`, `strcmp`, `strcpy`, `atoi`, `itoa`, `getpixel`,
+  `clear_rect`, `invert_rect` and `copy_rect`.  `getpixel` reads the shadow buffer,
+  so it works before and after `render()`.
 
 The deliberate differences from Wiz:
 
 - The single-character helper is **`glyph(x, y, c)`**, not `char` (C reserves `char` as a type).
 - `char` arrays hold one byte per element (`char buf[8]`), `int` arrays two; a `rom`/`rom8` table
-  is read-only and lives in ROM. There are **no structs** and only one index level
-  (`a[i]`, never `a[i][j]`) — but a pointer *is* indexable, see [§20.2](#202-pointers-and-memory).
+  is read-only and lives in ROM. Structs, unions, typedefs and multi-dimensional
+  arrays (`a[i][j]`) are supported; pointers remain indexable, see
+  [§20.2](#202-pointers-and-memory).
 - `char`, `rom`, `rom8`, `void`, … are keywords, so you cannot use them as identifiers.
 
 `print(x, y, …)` works exactly as in [§11](#11-text-numbers-and-print); a string literal or a
@@ -643,10 +702,16 @@ rom8 char debug_tag[4] = "dbg";
 #endif
 ```
 
-- Conditionals: `#ifdef`, `#ifndef`, `#if`, `#elif`, `#else`, `#endif`. `#if` takes the usual C
-  operators (arithmetic, `<<`, `>>`, `&`, `|`, `^`, `~`, `!`, comparisons, `&&`, `||`, `?:`,
-  parentheses), plus `defined(NAME)`; an identifier that is not a macro counts as `0`.
-- Other directives: `#define`, `#undef`, `#include "file.cwiz"`, `#pragma once`, `#error`.
+- Conditionals: `#ifdef`, `#ifndef`, `#if`, `#elif`, `#elifdef`, `#elifndef`, `#else`, `#endif`.
+  `#if` takes the usual C operators (arithmetic, `<<`, `>>`, `&`, `|`, `^`, `~`, `!`, comparisons,
+  `&&`, `||`, `?:`, parentheses), plus `defined(NAME)`, `__has_include("file")` and
+  `__has_c_attribute(attr)`; an identifier that is not a macro counts as `0`.
+- Other directives: `#define`, `#undef`, `#include "file.cwiz"`, `#include <stdint.h>` (the
+  built-in freestanding headers), `#pragma once`, `#error`, `#line N ["file"]` and
+  `#embed "file.bin"` (expands to a byte list).  Macros support `#`, `##`, `__VA_ARGS__` and
+  `__VA_OPT__`.
+- The canonical grammar, aliases and ordering rules are in [DIRECTIVES.md](DIRECTIVES.md); the C
+  language matrix is in [C-CONFORMANCE.md](C-CONFORMANCE.md).
 - Predefined macros: `__CWIZ__`, exactly one of `__CW__` / `__CWII__` / `__CWAPP__`, and
   `__ROWS__` (the target's row count).
 - `#for 580` / `#for 880` is the **target directive** — the directive spelling of the

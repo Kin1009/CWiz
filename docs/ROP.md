@@ -8,7 +8,7 @@ and the emulator injects it into RAM.
 ```c
 #rop
 #for 580
-#org E9E0        // payload address (default E9E0 on 580, E330 on 880)
+#org 0xE9E0        // payload address (default E9E0 on 580, E330 on 880)
 #launcher common // "launcher chung" (the default)
 
 int main() {
@@ -38,7 +38,10 @@ ROP needs two pieces of memory:
    by most existing 580 programs.
 
 The launcher is typed into the calculator's program input area (`D180` on the
-580, `9268` on the 880) and started with **LEFT** then **EXE**.
+580, `9268` on the 880) and started with **EXE** (`=`). On the 580, LEFT is an
+ordinary arrow key: it moves the input cursor and is handled by the stock
+calc-mode handler (`2:E234`), so "LEFT then EXE" can evaluate the wrong input
+line. LEFT+EXE is only meaningful for the 880/program-list variant.
 
 ## Chain encoding
 
@@ -102,8 +105,11 @@ each.
 | `setsfr()` | `setsfr` `0x0A0E0` | — |
 | `delay(ticks)` | `delay` `0x09F3C` | `ER0 = ticks`, `0x1F40` ≈ 1 s |
 | `waitshift()` | `waitshift` `0x23DDE` | blocks until SHIFT |
-| `getkey()` | `getkey` `0x2F5EA` | clears an inline slot, writes KI/KO and leaves the word in ER0 |
-| `getscancode()` | `getscancode` `0x1F24E` | blocking variant |
+| `wait_shift()` | `waitshift` `0x23DDE` | alias of `waitshift()` |
+| `waitshift_striped()` | `waitshift_striped` `0x23DDA` | striped SHIFT wait |
+| `getkey()` | `getkey` `0x2F5EA` | **ROP entry** (`BL ENTER`); writes the KI/KO word to `[ER0]`; the following `pop er0` loads it |
+| `getkeycode()` | `getkey` `0x2F5EA` | same raw read; `0x2F5E8` is the callable (`PUSH LR`) entry, not for chains |
+| `getscancode()` | `getscancode` `0x1F24E` | blocking variant; **ROP entry** (`BL ENTER`); `0x1F24C` is the callable (`PUSH LR`) entry, registered as `getscancode_call` for diagnostics |
 | `getscancode_nodelay()` | `getkey` `0x2F5EA` | same as `getkey` |
 | `keytable(k, label, ..., 0, default)` | `cmp_ea` `0x09C20` | compares the ER0 scancode with the table; jumps via `er6 = [ea]` |
 | `set_byte(addr, value)` | `[er0]=r2` `0x203D2` | `XR0 = addr, value, 0` |
@@ -121,47 +127,42 @@ is limited to 17 characters per line.
 
 ### Keyboard tables
 
-`getkey()`/`getscancode()` write a two-byte KI/KO word. `keytable` compares
-that word with a `cmp_ea` table and jumps to the matching label:
+`getkey()` follows the compiler's inline-slot pattern:
 
-```c
-getkey();
-keytable(0x0480, up,      // up
-         0x0840, down,    // down
-         0x0000, loop);   // default (cmp_ea stops at 00 00)
-```
-
-The word is little-endian: the community listings write the bytes KI then KO,
-so `hex 80 04` is `0x0480`. Arrow keys are `up 0x0480`, `down 0x0840`,
-`left 0x0440`, `right 0x0880`; SHIFT is `0x0180`, ALPHA `0x0280`.
-
-`getkey()` emits the community inline-slot sequence. The slot is cleared
-before each read because `getkey` leaves it unchanged when no key is down; the
-community loops re-copy the payload from backup, but a compiler `goto` does not:
+The compiler emits a runtime clear before every read (both 580 and 880):
 
 ```
-setlr           ; a preceding print/render BL may have clobbered LR
-pop xr0
-<slot>, 0000    ; ER0 = slot, ER2 = 0
-[er0]=er2,rt    ; clear the 2-byte KI/KO slot
-pop er0
-<slot>          ; ER0 = address of the 2-byte KI/KO slot
-getkey          ; writes the scancode to [ER0]
-setlr           ; establish LR before the final pop
-pop er0         ; loads the value getkey just wrote
-slot: 00 00     ; inline data consumed by the pop above
+setlr
+pop xr0                 ; ER0 = slot address, ER2 = 0
+<slot>, 0000
+[er0]=er2,rt            ; clear the 2-byte KI/KO slot
+pop er0                 ; ER0 = slot address
+<slot>
+getkey                  ; 2:F5EA (ROP entry; 2:F5E8 is the PUSH LR call entry)
+                        ; writes the raw KI/KO word to [ER0]
+setlr
+pop er0                 ; ER0 = the word just written
+slot: 00 00             ; inline data; tests assert these bytes
 ```
 
-The final `pop er0` is important: it loads the **scancode value**, not the
-slot address. The clear makes a released key read as `0x0000`, so the
-`keytable()` default branch runs instead of repeating the last key. Emit
-`keytable()` immediately after `getkey()`; any intervening call can overwrite
-ER0. `keytable()` then only loads EA with the table address and runs
-`cmp_ea`. The table is part of the payload, so its address uses the execution
-address (the community `ea = adr_of table`), and its entries store `label - 2`.
-`cmp_ea`, `pop ea` and `er6 = [ea]` exist in the 580 table only.
-`ea_switchcase` is accepted as another name for `cmp_ea`, and `reset_sfr`
-for `setsfr`; both spellings appear in the community chat.
+The slot is emitted as `00 00`, not the older community `0x3030` marker.
+`getkey`/`getkeycode` leave `[ER0]` unchanged when no key is pressed, so the
+run-time clear is required; otherwise a compiler loop re-dispatches the last
+key forever (see `firmware-re/fx580/proposals/rop-getkey.md`). Give the table
+a `(0x0000, loop)` default entry. `keytable()` then does
+`pop ea`/`cmp_ea`/`er6=[ea]` and emits `setlr` before `sp=er6,pop er8`. The
+community form also disables interrupts with `setlr_pc; di,rt` first; the
+compiler keeps `setlr`-only until a real-device test confirms the interrupt
+state (TODO, do not change without hardware evidence).
+Tables use the raw KI/KO words: `up 0x0480`, `down 0x0840`,
+`left 0x0440`, `right 0x0880`. The matching FCxx IDs are `FC1C=up`,
+`FC1D=down`, `FC1E=right`, `FC1F=left`; the old ROP notes had this
+transposed (see `docs/rop-keymap.md`).
+
+Caveat: the `er6 = [ea]` step is `0x1C64A`, which also writes
+`ER14, R13..R6` to `D000..D009` and clobbers `R6..R13`/`ER14`. Do not keep
+live ROP variables or the scancode argument block at `D000..D009` across a
+`keytable` dispatch; the compiler's `var_base` is `D000`.
 
 Known limitation: the 880 table has no `cmp_ea`, `pop ea` or `memcpy_length_rn/8`;
 `keytable` and `memcpy` are 580-only for now.
@@ -228,11 +229,56 @@ After the stub, SP points exactly at the payload.
 #nopad                          // no trailing null buffer
 ```
 
-"Build" writes `wiz/<name>.bin` (payload) and prints the launcher as hex in the
-log. The standalone `wizc` driver writes the launcher separately as
-`<name>.launcher.bin`. "Build & Run" also injects both blocks into the running
-model. Use **Copy launcher** in the toolbar to put the launcher hex on the
-clipboard.
+"Build" writes `wiz/<name>.bin` (payload) and `wiz/<name>.asm` (listing) and
+prints the launcher as hex in the log. The standalone `wizc` driver writes the
+launcher separately as `<name>.launcher.bin`. "Build & Run" also injects both
+blocks into the running model. Use **Copy launcher** in the toolbar to put the
+launcher hex on the clipboard.
+
+The `.asm` listing is written in the community ROP source style, so it can be
+read next to the hand written examples:
+
+```
+@section.main at 0xd730 backup 0xe9e0
+
+lbl main
+    setlr                   # 09FA8
+    setsfr                  # 0A0E0
+    buffer_clear            # 08C60
+    pop xr0                 # 17B34
+    hex 01 30
+    eval(adr(str_1)+dist.main) # EAFA
+    printline               # 23DC8
+    render.ddd4             # 0947E
+    pop er6                 # 13AB0
+    adr(keys) - 2           # D806
+    sp=er6,pop er8          # 21F74
+lbl keys
+    pop er0                 # 12602
+    adr(keyslot)            # D81A
+    setlr                   # 09FA8
+    getkey                  # 2F5EA
+    pop er0                 # 12602
+lbl keyslot
+    hex 00 00
+...
+lbl keytable_1
+    hex 80 04               # KEY_UP
+    adr(up) - 2             # D78E
+lbl str_1
+    # "PRESS A KEY"
+    hex 50 52 45 53 53 20 41 20
+```
+
+`lbl` marks a label, gadget words keep their mnemonic (with the ROM address in
+the comment), and plain bytes stay `hex`. A data word that is an address is
+printed as `adr(label)` (code target), `adr(label) - 2` (a target stored for
+`sp = er6, pop er8`, which pre-increments the stack) or
+`eval(adr(label)+dist.main)` (a pointer into the injected copy). Key table
+entries stay raw bytes with the community name as a comment (`hex 80 04 # KEY_UP`),
+so the listing keeps the same bytes whatever the assembler calls the key, and
+the string pool and null buffer get `lbl str_N` / `lbl pad`. The whole file is a source: comments are `#`. The resolved
+numbers and the compiler notes follow the listing after `# ---- notes ----`.
 
 ## Syntax
 
