@@ -2,7 +2,7 @@
   "name": "wiz-cwiz",
   "displayName": "Wiz / CWiz",
   "description": "Syntax highlighting, snippets and a linter for the Wiz (.wz) and CWiz (.cwiz) languages of the Casio ClassWiz toolchain.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "Kin1009",
   "license": "MIT",
   "engines": {
@@ -114,7 +114,9 @@
         "wiz.lint.lineLength": {
           "type": "number",
           "default": 100,
-          "description": "Report lines longer than this many columns."
+          "minimum": 20,
+          "maximum": 10000,
+          "description": "Report lines longer than this many columns. Also passed to wizlint as --max-line-length so both stages agree."
         },
         "wiz.compilerPath": {
           "type": "string",
@@ -146,6 +148,8 @@
     }
   },
   "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:diff": "node scripts/check-diff.js",
     "package": "node scripts/package.js"
   }
 }

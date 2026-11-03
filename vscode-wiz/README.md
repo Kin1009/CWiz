@@ -18,10 +18,14 @@ The editor linter runs in two stages:
    compiler and understand comments, strings, multi-line declarations,
    function parameters and scopes.
 2. **Compiler diagnostics** are added for saved files by running
-   `wizlint --json`. If `wizlint` is not installed the extension silently keeps
-   the in-memory result. The JSON carries the compiler's error **code**
+   `wizlint --json`, with `--max-line-length` taken from `wiz.lint.lineLength`.
+   If `wizlint` is not installed the extension silently keeps the in-memory
+   result. The JSON carries the compiler's error **code**
    (`sema.undefined-identifier`, `syntax.expected-token`, …), the exact end
-   column and an optional fix **hint**.
+   column and an optional fix **hint**. The code is what the Problems panel and
+   the diagnostic tooltip show as the diagnostic id (the lint rule id is used
+   when a diagnostic has no compiler code), and the rule stays in the message
+   as `[… rule]`.
 
 ## Linter
 
@@ -52,6 +56,8 @@ file** from the command palette to run both stages on demand.
 | `preproc/slot-order` | `#slot` is not inside a `#cwapp` section |
 | `preproc/slot-range` | `#slot` is not a number from 1 to 12 |
 | `preproc/duplicate-slot` | A `#cwapp` section has more than one `#slot` |
+| `preproc/noncanonical-directive` | A directive uses a compatibility alias (`#for cw`, `#org E9E0`, `#pad 0x100`, `#launcher shared`, …) |
+| `preproc/noncanonical-type` | `rom`/`rom8`/`__normalized__` uses a non-canonical placement |
 | `style/line-length` | Line longer than `wiz.lint.lineLength` |
 | `style/trailing-whitespace` | Trailing spaces or tabs |
 | `style/tabs` | Tab indentation (the examples use spaces) |
@@ -62,6 +68,10 @@ Diagnostics also carry a **`help:`** hint when there is an obvious fix (for
 example “use `'=='` for comparison” or “add `#endif`”). The hint appears in the
 diagnostic tooltip/related information and in `wizlint`'s terminal output.
 
+Severities are mapped in one place for both stages: `error` → Error,
+`warning` → Warning, `note`/`info` → Information, `hint` → Hint. The in-memory
+linter and `wizlint` therefore give the same rule the same weight.
+
 Settings:
 
 | Setting | Default | Meaning |
@@ -70,7 +80,7 @@ Settings:
 | `wiz.lint.onSave` | `true` | Lint when a document is saved |
 | `wiz.lint.onType` | `true` | Lint while typing (350 ms debounce) |
 | `wiz.lint.showHints` | `true` | Attach the `help:` hint to a diagnostic |
-| `wiz.lint.lineLength` | `100` | `style/line-length` limit |
+| `wiz.lint.lineLength` | `100` | `style/line-length` limit, also passed to `wizlint --max-line-length` (clamped to 20–10000) |
 | `wiz.lint.useCompiler` | `true` | Run `wizlint --json` on saved files |
 | `wiz.lint.compilerPath` | `wizlint` | Path to the command-line linter |
 | `wiz.lint.target` | `auto` | `auto`, `580`, `880`, or `cwapp` |
@@ -88,16 +98,39 @@ wizlint file.cwiz --target 580
 
 ## Directives
 
+The authoritative grammar is `docs/DIRECTIVES.md`; the extension highlights and
+completes exactly those spellings.
+
 | Directive | Meaning |
 |-----------|---------|
-| `#for 580` / `#for 880` | Start a section for that calculator |
+| `#for 580` / `#for 880` | Start a section for that calculator (`cwapp`/`all` also accepted) |
 | `#cwapp` | Start the fx-580VN X firmware-app section (after `#for 580`) |
 | `#slot n` | Menu slot to replace, `1`..`12` (after `#cwapp`; default `2`) |
-| `#include "file"` | Include another source file |
-| `#define`, `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`, `#pragma` | Normal preprocessor features |
+| `#binary "file.bin"` | Full firmware image (`fwnx` target) |
+| `#org 0xADDR` | `#cwapp` metadata, or the ROP payload origin |
+| `#rop`, `#pad N`, `#nopad`, `#launcher common\|simple` | ROP backend |
+| `#include "file"`, `#define`, `#undef`, `#pragma once`, `#error`, `#line`, `#embed` | Preprocessor and file directives |
+| `#if`, `#ifdef`, `#ifndef`, `#elif`, `#elifdef`, `#elifndef`, `#else`, `#endif` | Conditionals |
+
+Compatibility aliases (`#for cw`, `#org E9E0`, `#pad 0x100`, `#launcher shared`,
+…) still build but are reported as `preproc/noncanonical-directive`.
 
 `wizc` embeds a 580 ROM, so `wizc app.cwiz` writes a complete, already-patched
 `.bin`; `wizrun app.bin 580` runs it. `--cwapp` is no longer needed.
+
+## Completion and hover
+
+* **Directives (CWiz):** type `#` (or the first word of a line) to get the full
+  directive list, including the target/context in the detail pane.
+* **Built-ins:** every function from `docs/API.md` (`render`, `key_hit`,
+  `print_cw`, `_rpeek`, …) with its signature and description.
+* **Types:** `rom`, `rom8` and `__normalized__`, with the placement rules from
+  `docs/DIRECTIVES.md`.
+* **Hover:** on a `#directive` line, on a built-in call and on the custom types.
+
+The tables live in `src/directives.js`; `npm test` compares them with
+`compiler/src/directives.cpp` and `compiler/src/lint.cpp` when the toolchain is
+checked out next to the extension, so they cannot drift silently.
 
 ## Fonts
 
@@ -126,9 +159,14 @@ from `Wenti-D/ClasswizDisplayFont`). The latter is used by `print_cw`,
 
 ```
 cd vscode-wiz
-npm run package        # writes wiz-cwiz-1.2.0.vsix
-code --install-extension wiz-cwiz-1.2.0.vsix
+npm test               # unit checks for the linter, data tables and providers
+npm run test:diff      # optional: compare with a built ../build/wizlint
+npm run package        # writes wiz-cwiz-1.3.0.vsix
+code --install-extension wiz-cwiz-1.3.0.vsix
 ```
+
+`scripts/package.js` stages the VSIX under `vscode-wiz/temp/` (gitignored) and
+deletes it again, so nothing is written to a system temp directory.
 
 The language and linter are documented in the Wiz repository:
 `docs/GUIDE.md`, `docs/API.md` and `docs/RUNNING.md`.

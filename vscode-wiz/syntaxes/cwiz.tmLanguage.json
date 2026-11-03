@@ -17,7 +17,7 @@
     "directives": {
       "patterns": [
         {
-          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot|rop|org|launcher|pad|nopad|__asm__|__hex__)\\b(.*)$",
+          "match": "^\\s*(#)(for|include|define|undef|ifdef|ifndef|if|elifdef|elifndef|elif|else|endif|pragma|error|line|embed|binary|cwapp|slot|rop|org|launcher|pad|nopad)\\b(.*)$",
           "captures": {
             "1": { "name": "punctuation.definition.directive.cwiz" },
             "2": { "name": "keyword.control.directive.cwiz" },
@@ -66,7 +66,7 @@
       "patterns": [
         {
           "name": "keyword.control.cwiz",
-          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto|sizeof|__asm__|__hex__)\\b"
+          "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto|sizeof)\\b"
         },
         {
           "name": "storage.modifier.cwiz",
@@ -78,7 +78,7 @@
       "patterns": [
         {
           "name": "storage.type.cwiz",
-          "match": "\\b(void|int|char|bool|byte|short|long|unsigned|signed|rom8|rom16|int8|int16|arr)\\b"
+          "match": "\\b(void|int|char|bool|byte|short|long|unsigned|signed|rom|rom8)\\b"
         }
       ]
     },

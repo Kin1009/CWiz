@@ -36,6 +36,8 @@ const RULES = {
   'preproc/slot-order': 'error',
   'preproc/slot-range': 'error',
   'preproc/duplicate-slot': 'warning',
+  'preproc/noncanonical-directive': 'warning',
+  'preproc/noncanonical-type': 'warning',
   'style/line-length': 'warning',
   'style/trailing-whitespace': 'warning',
   'style/tabs': 'warning',
@@ -61,9 +63,9 @@ const BUILTINS = new Set([
   'flip', 'buffered', 'wipe', '_hspan', '_rpeek',
 ]);
 const KNOWN_DIRECTIVES = new Set([
-  'if', 'ifdef', 'ifndef', 'elif', 'else', 'endif', 'define', 'undef', 'pragma',
-  'error', 'include', 'for', 'cwapp', 'org', 'binary', 'slot', 'rop', 'launcher',
-  'pad', 'nopad', '__asm__', '__hex__', 'line',
+  'if', 'ifdef', 'ifndef', 'elif', 'elifdef', 'elifndef', 'else', 'endif', 'define',
+  'undef', 'pragma', 'error', 'include', 'line', 'embed', 'for', 'cwapp', 'org',
+  'binary', 'slot', 'rop', 'launcher', 'pad', 'nopad', '__asm__', '__hex__',
 ]);
 
 function isIdentStart(c) {
@@ -77,6 +79,68 @@ function trim(text) {
 }
 function lower(text) {
   return text.toLowerCase();
+}
+
+// Longest line the compiler accepts: `wizlint --max-line-length` rejects
+// anything outside 20..10000, so clamp here as well and both stages agree.
+const MIN_LINE_LENGTH = 20;
+const MAX_LINE_LENGTH = 10000;
+
+function clampLineLength(value) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return 100;
+  return Math.min(MAX_LINE_LENGTH, Math.max(MIN_LINE_LENGTH, n));
+}
+
+// ---------------------------------------------------------------- directives
+// Mirrors compiler/src/directives.cpp: `canonical_target_name`.
+function canonicalTargetName(text) {
+  let key = '';
+  for (const c of text) {
+    if (c === ' ' || c === '\t' || c === '-' || c === '_') continue;
+    key += c.toLowerCase();
+  }
+  if (key === '580' || key === 'cw' || key === '580vnx' || key === 'fx580vn' ||
+      key === 'fx580vnx') {
+    return '580';
+  }
+  if (key === '880' || key === 'cwii' || key === '880btg' || key === '880btg2') {
+    return '880';
+  }
+  return '';
+}
+
+// Mirrors compiler/src/directives.cpp: `canonical_address`.
+function canonicalAddress(value) {
+  return `0x${value.toString(16).toUpperCase()}`;
+}
+
+// Mirrors compiler/src/directives.cpp: `parse_directive_number`.  `[...]` is
+// accepted for older ROP notes; a bare hexadecimal spelling is only accepted
+// when `allowBareHex` is set, and is reported in `bare` so lint can warn.
+function parseDirectiveNumber(text, allowBareHex) {
+  let s = trim(text);
+  if (s.length >= 2 && s[0] === '[' && s[s.length - 1] === ']') s = trim(s.slice(1, -1));
+  if (!s) return null;
+
+  let digits = s;
+  let base = 10;
+  let bare = false;
+  if (s.length > 2 && s[0] === '0' && (s[1] === 'x' || s[1] === 'X')) {
+    digits = s.slice(2);
+    if (!/^[0-9a-fA-F]+$/.test(digits)) return null;
+    base = 16;
+  } else if (/^[0-9]+$/.test(s)) {
+    base = 10;
+  } else if (allowBareHex && /^[0-9a-fA-F]+$/.test(s)) {
+    base = 16;
+    bare = true;
+  } else {
+    return null;
+  }
+  const value = parseInt(digits, base);
+  if (!Number.isFinite(value)) return null;
+  return { value, bare };
 }
 
 function splitTopLevel(text, separator) {
@@ -480,7 +544,7 @@ function lintText(text, options = {}) {
   const kind = options.languageId === 'wiz' || options.languageId === 'cwiz'
     ? options.languageId
     : (options.fileName && options.fileName.endsWith('.cwiz') ? 'cwiz' : 'wiz');
-  const lineLimit = Math.max(20, Number(options.lineLength) || 100);
+  const lineLimit = clampLineLength(options.lineLength);
   const { lines, code, comments, directives } = stripNoise(text, kind);
   const diagnostics = [];
 
@@ -502,6 +566,56 @@ function lintText(text, options = {}) {
         const hint = didYouMean(name, [...KNOWN_DIRECTIVES]);
         diagnostics.push(diagnostic('error', i + 1, 1, raw.length + 1,
           'preproc/unknown-directive', `unknown directive '#${name}'`, hint));
+      }
+      if (name) {
+        const rest = trim(t.slice(m[0].length));
+        // The compiler anchors these rules on the directive name and spans the
+        // trimmed line (compiler/src/lint.cpp: col = s + 1, end = t.size() + 1).
+        const nameCol = m[0].length - name.length + 1;
+        const noncanonical = (message, hint) => diagnostics.push(
+          diagnostic('warning', i + 1, nameCol, t.length + 1,
+            'preproc/noncanonical-directive', message, hint));
+        if (name === 'for' && rest) {
+          // compiler/src/lint.cpp: compatibility #for target aliases.
+          const first = trim(rest.slice(0, rest.includes(',') ? rest.indexOf(',') : rest.length));
+          const canonical = canonicalTargetName(first);
+          if (canonical && lower(first) !== canonical) {
+            noncanonical('#for uses a compatibility target alias',
+              `use '#for ${canonical}'`);
+          }
+        } else if (name === 'org') {
+          const parsed = parseDirectiveNumber(rest, true);
+          if (parsed && parsed.bare) {
+            noncanonical('#org uses a bare hexadecimal address',
+              `use '#org ${canonicalAddress(parsed.value)}'`);
+          }
+        } else if (name === 'pad') {
+          if (rest.length > 2 && rest[0] === '0' && (rest[1] === 'x' || rest[1] === 'X')) {
+            noncanonical('#pad uses a hexadecimal size',
+              "use a decimal size, for example '#pad 256'");
+          }
+        } else if (name === 'slot') {
+          if (rest.length > 2 && rest[0] === '0' && (rest[1] === 'x' || rest[1] === 'X')) {
+            noncanonical('#slot uses a hexadecimal number',
+              "use a decimal slot, for example '#slot 2'");
+          }
+        } else if (name === 'launcher') {
+          const first = rest.split(/[ \t]/)[0] || '';
+          const spelling = lower(first);
+          if (spelling === 'shared' || spelling === 'chung') {
+            noncanonical('#launcher uses a compatibility alias',
+              "use '#launcher common'");
+          } else if (spelling === 'stub') {
+            noncanonical('#launcher uses a compatibility alias',
+              "use '#launcher simple'");
+          } else if (first && spelling !== 'common' && spelling !== 'simple') {
+            const parsed = parseDirectiveNumber(first, true);
+            if (parsed) {
+              noncanonical('#launcher places the simple stub with a bare address',
+                `use '#launcher simple ${canonicalAddress(parsed.value)}'`);
+            }
+          }
+        }
       }
       if (name === 'if' || name === 'ifdef' || name === 'ifndef') conditionalStack.push(i + 1);
       else if (name === 'elif' || name === 'else') {
@@ -576,6 +690,34 @@ function lintText(text, options = {}) {
         if (!/^\d+$/.test(value) || !Number.isInteger(n) || n < 1 || n > 12) {
           diagnostics.push(diagnostic('error', i + 1, 1, raw.length + 1, 'preproc/slot-range',
             '#slot needs a slot number from 1 to 12', "for example '#slot 2'"));
+        }
+      }
+    }
+
+    // `rom` / `rom8` / `__normalized__` placement (compiler/src/lint.cpp).
+    if (kind === 'cwiz' && !directives[i]) {
+      const codeLine = trim(code[i]);
+      const typeWarning = (message, hint) => diagnostics.push(
+        diagnostic('warning', i + 1, 1, t.length + 1,
+          'preproc/noncanonical-type', message, hint));
+      const rom8At = codeLine.indexOf('rom8');
+      const romAt = codeLine.indexOf('rom');
+      if (rom8At >= 0 &&
+          (rom8At + 4 >= codeLine.length || codeLine.slice(rom8At + 4, rom8At + 9) !== ' char')) {
+        typeWarning('rom8 is a byte storage qualifier',
+          'write \'rom8 char name[N] = "...";\'');
+      } else if (romAt >= 0 && rom8At !== romAt &&
+                 (romAt + 3 >= codeLine.length || codeLine.slice(romAt + 3, romAt + 7) !== ' int')) {
+        typeWarning('rom is a 16-bit word storage qualifier',
+          'write \'rom int name[N] = { ... };\'');
+      }
+      const normalizedAt = codeLine.indexOf('__normalized__');
+      if (normalizedAt >= 0) {
+        const after = trim(codeLine.slice(normalizedAt + 14));
+        const ok = after.startsWith('rom8 char ') || after.startsWith('char ');
+        if (normalizedAt !== 0 || !ok) {
+          typeWarning('__normalized__ must be the first attribute on a char array',
+            'write \'__normalized__ rom8 char name[N] = "...";\'');
         }
       }
     }
@@ -855,4 +997,4 @@ function didYouMean(word, candidates) {
   return bestD <= limit ? `did you mean '${best}'?` : '';
 }
 
-module.exports = { RULES, lintText, stripNoise };
+module.exports = { RULES, lintText, stripNoise, clampLineLength };

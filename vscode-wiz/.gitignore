@@ -1,0 +1,5 @@
+# Packaging staging (scripts/package.js) stays in the repository, never in a
+# system temp directory; see AGENTS.md.  Removed after each run.
+temp/
+
+node_modules/

@@ -11,13 +11,24 @@
 const vscode = require('vscode');
 const path = require('path');
 const { execFile } = require('child_process');
-const { lintText } = require('./linter');
+const { lintText, clampLineLength } = require('./linter');
+const { createCompletionItemProvider, createHoverProvider } = require('./providers');
 
-const SEVERITY = {
-  error: vscode.DiagnosticSeverity.Error,
-  warning: vscode.DiagnosticSeverity.Warning,
-  note: vscode.DiagnosticSeverity.Information,
-};
+// One severity mapping for the in-memory linter and for `wizlint --json`, so a
+// rule keeps the same weight in both stages.  `wizlint` emits error/warning/note;
+// numbers are accepted for a JSON shape that already carries the enum value.
+function severityOf(value) {
+  if (typeof value === 'number' && value >= 0 && value <= 3) return value;
+  switch (String(value || '').toLowerCase()) {
+    case 'error': return vscode.DiagnosticSeverity.Error;
+    case 'note':
+    case 'info':
+    case 'information': return vscode.DiagnosticSeverity.Information;
+    case 'hint': return vscode.DiagnosticSeverity.Hint;
+    case 'warning':
+    default: return vscode.DiagnosticSeverity.Warning;
+  }
+}
 
 function isWizDocument(doc) {
   return !!doc && (doc.languageId === 'wiz' || doc.languageId === 'cwiz');
@@ -28,20 +39,25 @@ function config() {
 }
 
 function toVscodeDiagnostics(doc, items) {
+  const showHints = config().get('lint.showHints');
   return items.map((item) => {
     const line = Math.max(0, Number(item.line) - 1 || 0);
     const col = Math.max(0, Number(item.col) - 1 || 0);
     const rawEnd = Number(item.endCol) || Number(item.col) + 1;
     const endCol = Math.max(col + 1, rawEnd - 1);
     const range = new vscode.Range(line, col, line, endCol);
+    const rule = item.rule || 'compile';
     const diagnostic = new vscode.Diagnostic(
       range,
-      `${item.message} [${item.rule}]`,
-      SEVERITY[item.severity] || vscode.DiagnosticSeverity.Warning,
+      `${item.message} [${rule}]`,
+      severityOf(item.severity),
     );
     diagnostic.source = 'wiz';
-    diagnostic.code = item.rule;
-    if (item.hint && config().get('lint.showHints')) {
+    // The Problems entry and the tooltip show the stable id: the compiler's
+    // error category (`sema.undefined-identifier`, `syntax.expected-token`, …)
+    // when it has one, otherwise the lint rule id.
+    diagnostic.code = item.code || rule;
+    if (item.hint && showHints) {
       diagnostic.relatedInformation = [
         new vscode.DiagnosticRelatedInformation(
           new vscode.Location(doc.uri, range),
@@ -70,7 +86,7 @@ function activate(context) {
   const jsDiagnostics = (doc) => lintText(doc.getText(), {
     fileName: doc.fileName,
     languageId: doc.languageId,
-    lineLength: config().get('lint.lineLength'),
+    lineLength: clampLineLength(config().get('lint.lineLength')),
   });
 
   const publish = (doc, items) => {
@@ -86,6 +102,9 @@ function activate(context) {
     const target = config().get('lint.target') || 'auto';
     const args = ['--json'];
     if (target && target !== 'auto') args.push('--target', target);
+    // Keep both stages on the same limit: the in-memory linter clamps to the
+    // range `wizlint --max-line-length` accepts (20..10000).
+    args.push('--max-line-length', String(clampLineLength(config().get('lint.lineLength'))));
     args.push(doc.uri.fsPath);
 
     execFile(
@@ -165,6 +184,10 @@ function activate(context) {
   };
 
   context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider('cwiz', createCompletionItemProvider('cwiz'), '#'),
+    vscode.languages.registerCompletionItemProvider('wiz', createCompletionItemProvider('wiz')),
+    vscode.languages.registerHoverProvider({ language: 'cwiz' }, createHoverProvider('cwiz')),
+    vscode.languages.registerHoverProvider({ language: 'wiz' }, createHoverProvider('wiz')),
     vscode.workspace.onDidOpenTextDocument((doc) => lint(doc, true)),
     vscode.workspace.onDidSaveTextDocument((doc) => {
       if (config().get('lint.onSave')) lint(doc, true);

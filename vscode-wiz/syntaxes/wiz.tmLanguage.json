@@ -16,7 +16,7 @@
     "directives": {
       "patterns": [
         {
-          "match": "^\\s*(#)(for|include|define|ifdef|ifndef|if|elif|else|endif|pragma|cwapp|slot|rop|org|launcher|pad|nopad|__asm__|__hex__)\\b(.*)$",
+          "match": "^\\s*(#)(for|include|define|undef|ifdef|ifndef|if|elifdef|elifndef|elif|else|endif|pragma|error|line|embed|binary|cwapp|slot|rop|org|launcher|pad|nopad)\\b(.*)$",
           "captures": {
             "1": { "name": "punctuation.definition.directive.wiz" },
             "2": { "name": "keyword.control.directive.wiz" },
@@ -60,11 +60,11 @@
       "patterns": [
         {
           "name": "keyword.control.wiz",
-          "match": "\\b(def|return|if|elif|else|for|while|break|continue|pass|and|or|not|in|is|True|False|None|__asm__|__hex__)\\b"
+          "match": "\\b(def|return|if|elif|else|for|while|break|continue|pass|and|or|not|in|is|True|False|None)\\b"
         },
         {
           "name": "storage.type.wiz",
-          "match": "\\b(int|char|bool|byte|rom8|rom16|int8|int16|arr|void)\\b"
+          "match": "\\b(int|char|bool|byte|rom|rom8|void)\\b"
         }
       ]
     },
@@ -89,14 +89,6 @@
         {
           "name": "variable.other.wiz",
           "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
-        }
-      ]
-    },
-    "variables": {
-      "patterns": [
-        {
-          "name": "variable.other.wiz",
-          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
         }
       ]
     },

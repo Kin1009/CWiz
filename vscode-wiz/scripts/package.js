@@ -11,7 +11,11 @@ const { execFileSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const out = path.join(root, `${pkg.name}-${pkg.version}.vsix`);
-const staging = fs.mkdtempSync(path.join(require('os').tmpdir(), 'wiz-vsix-'));
+// Staging stays inside the repository (AGENTS.md: no system temp paths) and is
+// removed in the `finally` block below, on success and on failure alike.
+const stagingRoot = path.join(root, 'temp');
+fs.mkdirSync(stagingRoot, { recursive: true });
+const staging = fs.mkdtempSync(path.join(stagingRoot, 'vsix-'));
 
 const contentTypes = `<?xml version="1.0" encoding="utf-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -59,6 +63,9 @@ for (const item of ['package.json', 'README.md', 'src', 'syntaxes', 'snippets',
 }
 
 try { fs.unlinkSync(out); } catch {}
-execFileSync('zip', ['-q', '-r', out, '.'], { cwd: staging, stdio: 'inherit' });
-fs.rmSync(staging, { recursive: true, force: true });
+try {
+  execFileSync('zip', ['-q', '-r', out, '.'], { cwd: staging, stdio: 'inherit' });
+} finally {
+  fs.rmSync(staging, { recursive: true, force: true });
+}
 console.log(out);
