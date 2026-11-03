@@ -1,0 +1,10 @@
+// Calculate application module. Placeholder until calculator entry is implemented.
+void calculate_app() {
+    clear();
+    print_cw(0, 0, "Calculate");
+    print(0, 20, "Standard calculation");
+    print(0, 32, "App module ready");
+    print(0, 56, "AC: Home");
+    render();
+    while (key() == K_NONE) { delay(1); }
+}

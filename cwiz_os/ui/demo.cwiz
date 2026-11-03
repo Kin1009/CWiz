@@ -1,0 +1,2 @@
+#include "menus/demo.cwiz"
+void main() { demo_chooser(1); }

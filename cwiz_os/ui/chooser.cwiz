@@ -1,0 +1,244 @@
+// Reusable chooser for the CWiz OS.
+//
+// Two variants:
+//   variant 0 (big):   4 lines/page, big CW font, labels 1..4 on the left,
+//                      text trimmed to 12 + "..." when longer than 15.
+//   variant 1 (small): 6 rows x 2 columns (left 1..6, right 7..C),
+//                      6x8 font, text trimmed to 7 + "..." when >= 10.
+//
+// A 2px scroller is drawn at x=190..191 only when the menu has more than one
+// page. Up/Down page; AC cancels (-1); a valid key returns the item index.
+//
+// Items live in `chooser_blob` as NUL-terminated bytes. A menu module copies
+// its own rom8 blob in, sets chooser_count/chooser_variant, then calls
+// chooser_run(). `tools/gen_chooser.py` generates such a module.
+
+char chooser_blob[512];
+int chooser_count = 0;
+int chooser_variant = 0;
+
+// ---- glyphs -------------------------------------------------------
+// The prelude has no callable char_cw() in this target, so draw directly
+// from the font tables (the same tables print_cw uses).
+void cw_glyph(int x, int y, int c) {
+    if (c < 32 || c > 126) { c = 63; }
+    int base = (c - 32) * 13;
+    int r = 0;
+    while (r < 13) {
+        int bits = _cw_font[base + r];
+        int bit = 1024;
+        int k = 0;
+        while (k < 11) {
+            if ((bits & bit) != 0) {
+                int start = k;
+                while (k < 11 && (bits & bit) != 0) {
+                    k = k + 1;
+                    bit = bit >> 1;
+                }
+                _hspan(x + start, x + k, y + r, 1);
+            } else {
+                k = k + 1;
+                bit = bit >> 1;
+            }
+        }
+        r = r + 1;
+    }
+}
+
+void small_glyph(int x, int y, int c) {
+    if (c < 32 || c > 126) { c = 63; }
+    int base = (c - 32) * 8;
+    int r = 0;
+    while (r < 8) {
+        int bits = _font[base + r];
+        int bit = 128;
+        int k = 0;
+        while (k < 6) {
+            if ((bits & bit) != 0) {
+                int start = k;
+                while (k < 6 && (bits & bit) != 0) {
+                    k = k + 1;
+                    bit = bit >> 1;
+                }
+                _hspan(x + start, x + k, y + r, 1);
+            } else {
+                k = k + 1;
+                bit = bit >> 1;
+            }
+        }
+        r = r + 1;
+    }
+}
+
+// ---- item helpers -------------------------------------------------
+int chooser_len(int off) {
+    int n = 0;
+    while (n < 64 && chooser_blob[off + n] != 0) { n = n + 1; }
+    return n;
+}
+
+int chooser_offset(int index) {
+    int off = 0;
+    int i = 0;
+    while (i < index) {
+        while (chooser_blob[off] != 0) { off = off + 1; }
+        off = off + 1;
+        i = i + 1;
+    }
+    return off;
+}
+
+void cw_text(int x, int y, int off, int max) {
+    int len = chooser_len(off);
+    int shown = len;
+    if (len > max) { shown = max - 3; }
+    int i = 0;
+    while (i < shown) {
+        cw_glyph(x + i * 11, y, chooser_blob[off + i]);
+        i = i + 1;
+    }
+    if (len > max) {
+        cw_glyph(x + shown * 11, y, 46);
+        cw_glyph(x + (shown + 1) * 11, y, 46);
+        cw_glyph(x + (shown + 2) * 11, y, 46);
+    }
+}
+
+void small_text(int x, int y, int off, int max) {
+    int len = chooser_len(off);
+    int shown = len;
+    if (len > max) { shown = max - 3; }
+    int i = 0;
+    while (i < shown) {
+        small_glyph(x + i * 6, y, chooser_blob[off + i]);
+        i = i + 1;
+    }
+    if (len > max) {
+        small_glyph(x + shown * 6, y, 46);
+        small_glyph(x + (shown + 1) * 6, y, 46);
+        small_glyph(x + (shown + 2) * 6, y, 46);
+    }
+}
+
+// ---- labels -------------------------------------------------------
+void big_label(int x, int y, int slot) {
+    cw_glyph(x, y, 49 + slot);      // '1'..'4'
+    cw_glyph(x + 11, y, 46);        // '.'
+}
+
+void small_label(int x, int y, int slot) {
+    if (slot < 9) { small_glyph(x, y, 49 + slot); }
+    else { small_glyph(x, y, 56 + slot); }  // 9 -> A, 10 -> B, 11 -> C
+    small_glyph(x + 6, y, 46);              // '.'
+}
+
+// ---- pages --------------------------------------------------------
+void draw_scroller(int page, int pages) {
+    if (pages <= 1) { return; }
+    int top = 2;
+    int height = 60;
+    int thumb = height / pages;
+    if (thumb < 8) { thumb = 8; }
+    int y = top;
+    if (pages > 1) { y = top + (height - thumb) * page / (pages - 1); }
+    int i = 0;
+    while (i < thumb) {
+        pixel(190, y + i, 1);
+        pixel(191, y + i, 1);
+        i = i + 1;
+    }
+}
+
+void update_status(int page, int pages) {
+    if (page > 0) { setStatus(UP, HIGH); } else { setStatus(UP, LOW); }
+    if (page + 1 < pages) { setStatus(DOWN, HIGH); } else { setStatus(DOWN, LOW); }
+    renderStatus();
+}
+
+void draw_big(int page) {
+    int i = 0;
+    while (i < 4) {
+        int idx = page * 4 + i;
+        if (idx < chooser_count) {
+            int y = 2 + i * 16;
+            big_label(0, y, i);
+            cw_text(22, y, chooser_offset(idx), 15);
+        }
+        i = i + 1;
+    }
+}
+
+void draw_small(int page) {
+    int i = 0;
+    while (i < 6) {
+        int y = 2 + i * 10;
+        int left = page * 12 + i;
+        if (left < chooser_count) {
+            small_label(0, y, i);
+            small_text(12, y, chooser_offset(left), 14);
+        }
+        int right = page * 12 + 6 + i;
+        if (right < chooser_count) {
+            small_label(96, y, 6 + i);
+            small_text(108, y, chooser_offset(right), 14);
+        }
+        i = i + 1;
+    }
+}
+
+int chooser_slot() {
+    if (key_hit(K_1)) { return 0; }
+    if (key_hit(K_2)) { return 1; }
+    if (key_hit(K_3)) { return 2; }
+    if (key_hit(K_4)) { return 3; }
+    if (key_hit(K_5)) { return 4; }
+    if (key_hit(K_6)) { return 5; }
+    if (key_hit(K_7)) { return 6; }
+    if (key_hit(K_8)) { return 7; }
+    if (key_hit(K_9)) { return 8; }
+    if (key_hit(K_NEG)) { return 9; }
+    if (key_hit(K_DEG)) { return 10; }
+    if (key_hit(K_INV)) { return 11; }
+    return -1;
+}
+
+// ---- entry --------------------------------------------------------
+int chooser_run() {
+    int per = 4;
+    if (chooser_variant != 0) { per = 12; }
+    int pages = (chooser_count + per - 1) / per;
+    if (pages < 1) { pages = 1; }
+    int page = 0;
+    while (1) {
+        clear();
+        if (chooser_variant == 0) { draw_big(page); }
+        else { draw_small(page); }
+        draw_scroller(page, pages);
+        update_status(page, pages);
+        render();
+        while (1) {
+            if (key_hit(K_UP)) {
+                if (page > 0) { page = page - 1; }
+                break;
+            }
+            if (key_hit(K_DOWN)) {
+                if (page + 1 < pages) { page = page + 1; }
+                break;
+            }
+            if (key_hit(K_AC)) { return -1; }
+            int slot = chooser_slot();
+            if (slot >= 0) {
+                if (chooser_variant == 0) {
+                    if (slot < 4 && page * 4 + slot < chooser_count) {
+                        return page * 4 + slot;
+                    }
+                } else {
+                    if (page * 12 + slot < chooser_count) {
+                        return page * 12 + slot;
+                    }
+                }
+            }
+            delay(1);
+        }
+    }
+}

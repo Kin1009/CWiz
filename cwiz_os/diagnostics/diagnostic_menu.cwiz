@@ -1,0 +1,309 @@
+#include "memory_test.cwiz"
+#include "key_test.cwiz"
+
+// Persistent diagnostic state (RAM, below SB2).
+const int RAM_CORRECT = 0xDCF0;
+const int RAM_TRIES = 0xDCF1;
+const int RAM_SEED = 0xDCF2;
+
+void wait_shift() {
+    while (key_down(K_SHIFT)) { delay(1); }
+    while (!key_hit(K_SHIFT)) { delay(1); }
+}
+
+// Print one hex digit (0-9, A-F) in the big CW font.
+void hex_digit(int x, int y, int d) {
+    if (d == 0) { print_cw(x, y, "0"); }
+    else if (d == 1) { print_cw(x, y, "1"); }
+    else if (d == 2) { print_cw(x, y, "2"); }
+    else if (d == 3) { print_cw(x, y, "3"); }
+    else if (d == 4) { print_cw(x, y, "4"); }
+    else if (d == 5) { print_cw(x, y, "5"); }
+    else if (d == 6) { print_cw(x, y, "6"); }
+    else if (d == 7) { print_cw(x, y, "7"); }
+    else if (d == 8) { print_cw(x, y, "8"); }
+    else if (d == 9) { print_cw(x, y, "9"); }
+    else if (d == 10) { print_cw(x, y, "A"); }
+    else if (d == 11) { print_cw(x, y, "B"); }
+    else if (d == 12) { print_cw(x, y, "C"); }
+    else if (d == 13) { print_cw(x, y, "D"); }
+    else if (d == 14) { print_cw(x, y, "E"); }
+    else { print_cw(x, y, "F"); }
+}
+
+// Print a byte as two hex digits.
+void hex_byte(int x, int y, int n) {
+    hex_digit(x, y, (n >> 4) & 15);
+    hex_digit(x + 11, y, n & 15);
+}
+
+// Full RAM wipe (runtime builtin: clears 0xD000..0xFFFF and halts).
+void clear_all_memory() {
+    clear();
+    print_cw(0, 0, "CLEARING");
+    render();
+    wipe();
+}
+
+void clear_all_menu() {
+    clear();
+    print_cw(0, 0, "CLEAR ALL RAM");
+    print_cw(0, 16, "SHIFT: CLEAR");
+    print_cw(0, 32, "AC: BACK");
+    render();
+    while (1) {
+        if (key_hit(K_AC)) { return; }
+        if (key_hit(K_SHIFT)) { clear_all_memory(); }
+        delay(1);
+    }
+}
+
+// Eight 24-pixel bands with 8/8 down to 1/8 ink coverage.
+void draw_contrast_bands() {
+    int band = 0;
+    while (band < 8) {
+        int level = 8 - band;
+        int x = band * 24;
+        int x_end = x + 24;
+        while (x < x_end) {
+            int y = 0;
+            while (y < 48) {
+                if (((x + y) & 7) < level) { pixel(x, y, 1); }
+                y = y + 1;
+            }
+            x = x + 1;
+        }
+        band = band + 1;
+    }
+}
+
+void run_display_test() {
+    // Automatic screen test: checkerboard, inverse, all ink, all clear.
+    draw_checkerboard(0);
+    wait_shift();
+    draw_checkerboard(1);
+    wait_shift();
+    int i = 0;
+    while (i < 2048) { poke(SB2 + i, 0xFF); i = i + 1; }
+    render();
+    wait_shift();
+    i = 0;
+    while (i < 2048) { poke(SB2 + i, 0); i = i + 1; }
+    render();
+    wait_shift();
+}
+
+void print_letter(int x, int y, int n) {
+    if (n == 0) { print_cw(x, y, "A"); }
+    else if (n == 1) { print_cw(x, y, "B"); }
+    else if (n == 2) { print_cw(x, y, "C"); }
+    else if (n == 3) { print_cw(x, y, "D"); }
+    else if (n == 4) { print_cw(x, y, "E"); }
+    else if (n == 5) { print_cw(x, y, "F"); }
+    else if (n == 6) { print_cw(x, y, "G"); }
+    else if (n == 7) { print_cw(x, y, "H"); }
+    else if (n == 8) { print_cw(x, y, "I"); }
+    else if (n == 9) { print_cw(x, y, "J"); }
+    else if (n == 10) { print_cw(x, y, "K"); }
+    else if (n == 11) { print_cw(x, y, "L"); }
+    else if (n == 12) { print_cw(x, y, "M"); }
+    else if (n == 13) { print_cw(x, y, "N"); }
+    else if (n == 14) { print_cw(x, y, "O"); }
+    else if (n == 15) { print_cw(x, y, "P"); }
+    else if (n == 16) { print_cw(x, y, "Q"); }
+    else if (n == 17) { print_cw(x, y, "R"); }
+    else if (n == 18) { print_cw(x, y, "S"); }
+    else if (n == 19) { print_cw(x, y, "T"); }
+    else if (n == 20) { print_cw(x, y, "U"); }
+    else if (n == 21) { print_cw(x, y, "V"); }
+    else if (n == 22) { print_cw(x, y, "W"); }
+    else if (n == 23) { print_cw(x, y, "X"); }
+    else if (n == 24) { print_cw(x, y, "Y"); }
+    else { print_cw(x, y, "Z"); }
+}
+
+// Version & SUM: four big-font lines. SHIFT is the hidden serial trigger.
+void show_version_screen() {
+    clear();
+    print_cw(24, 24, "Processing");
+    render();
+    int total = 0;
+    int i = 0;
+    while (i < 3456) {
+        total = (total + menu_icons[i]) & 0xFFFF;
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 1235) {
+        int v = _cw_font[i];
+        total = (total + (v & 255)) & 0xFFFF;
+        total = (total + ((v >> 8) & 255)) & 0xFFFF;
+        i = i + 1;
+    }
+    i = 0;
+    while (i < 760) {
+        total = (total + _font[i]) & 0xFFFF;
+        i = i + 1;
+    }
+    int stored_sum = menu_icons_sum[0] + (menu_icons_sum[1] << 8);
+    int letter = stored_sum % 26;
+    clear();
+    print_cw(63, 0, "EX-580");
+    print_cw(20, 16, "V.");
+    print_letter(44, 16, letter);
+    print_cw(66, 16, CWIZ_VERSION_TEXT);
+    print_cw(10, 32, "SUM");
+    hex_byte(54, 32, (total >> 8) & 255);
+    hex_byte(76, 32, total & 255);
+    if (total == stored_sum) { print_cw(120, 32, "OK"); }
+    else { print_cw(120, 32, "NG"); }
+    print_cw(52, 48, "Press AC");
+    render();
+    while (1) {
+        if (key_down(K_SHIFT)) { show_serial_screen(); return; }
+        if (key_hit(K_AC)) { return; }
+        delay(1);
+    }
+}
+
+// Serial: title plus the 24-character serial split over lines 2 and 3.
+// The bytes are read only from the DBE0 span written by store_serial_number().
+void show_serial_screen() {
+    clear();
+    print_cw(13, 0, "[Serial number]");
+    // Line 2: 0580-2710-2639-
+    hex_byte(13, 16, peek(0xDBE0));
+    hex_byte(35, 16, peek(0xDBE1));
+    print_cw(57, 16, "-");
+    hex_byte(68, 16, peek(0xDBE2));
+    hex_byte(90, 16, peek(0xDBE3));
+    print_cw(112, 16, "-");
+    hex_byte(123, 16, peek(0xDBE4));
+    hex_byte(145, 16, peek(0xDBE5));
+    print_cw(167, 16, "-");
+    // Line 3: 4CCD-4667-7E94
+    hex_byte(13, 32, peek(0xDBE6));
+    hex_byte(35, 32, peek(0xDBE7));
+    print_cw(57, 32, "-");
+    hex_byte(68, 32, peek(0xDBE8));
+    hex_byte(90, 32, peek(0xDBE9));
+    print_cw(112, 32, "-");
+    hex_byte(123, 32, peek(0xDBEA));
+    hex_byte(145, 32, peek(0xDBEB));
+    print_cw(52, 48, "Press AC");
+    render();
+    while (1) {
+        if (key_hit(K_AC)) { return; }
+        delay(1);
+    }
+}
+
+void mini_menu() {
+    while (1) {
+        clear();
+        print(0, 0, "1. Display");
+        print(0, 10, "2. Version & SUM");
+        print(0, 20, "3. Key test");
+        print(0, 30, "4. Clear RAM");
+        print(0, 40, "AC: BACK");
+        render();
+        while (1) {
+            if (key_hit(K_1)) { run_display_test(); break; }
+            if (key_hit(K_2)) { show_version_screen(); break; }
+            if (key_hit(K_3)) { run_key_tests(); break; }
+            if (key_hit(K_4)) { clear_all_menu(); break; }
+            if (key_hit(K_AC)) { return; }
+            delay(1);
+        }
+    }
+}
+
+// Diagnostic entry. Exit paths return to main (which halts); they never call
+// app_launcher() directly.
+void diagnostic_menu() {
+    // Repair a corrupted counter pair on entry.
+    int correct0 = peek(RAM_CORRECT);
+    int tries0 = peek(RAM_TRIES);
+    if (correct0 > tries0) {
+        poke(RAM_CORRECT, 0);
+        poke(RAM_TRIES, 0);
+    }
+
+    while (1) {
+        clear();
+        int seed = peek(RAM_SEED);
+        seed = (seed * 37 + 11) & 0xFF;
+        poke(RAM_SEED, seed);
+        int use_add = seed & 1;
+        int x;
+        int y;
+        if (use_add) {
+            x = 1 + (seed % 4);
+            y = 1 + ((seed / 4) % (5 - x));
+        } else {
+            x = 2 + (seed % 4);
+            y = 1 + ((seed / 4) % (x - 1));
+        }
+        int expected = use_add ? (x + y) : (x - y);
+
+        // Top-left equation, one pixel from the corner.
+        num_cw(1, 1, x);
+        if (use_add) { print_cw(13, 1, "+"); } else { print_cw(13, 1, "-"); }
+        num_cw(24, 1, y);
+        print_cw(35, 1, "=?");
+
+        // Top-right correct/total counters in hex.
+        hex_byte(137, 1, peek(RAM_CORRECT));
+        print_cw(159, 1, "/");
+        hex_byte(170, 1, peek(RAM_TRIES));
+
+        print_cw(0, 51, "Press AC");
+        render();
+
+        while (1) {
+            if (key_hit(K_6)) { mini_menu(); break; }
+            if (key_hit(K_9)) { run_every_test(); return; }
+
+            int attempt = -1;
+            if (key_hit(K_0)) { attempt = 0; }
+            if (key_hit(K_1)) { attempt = 1; }
+            if (key_hit(K_2)) { attempt = 2; }
+            if (key_hit(K_3)) { attempt = 3; }
+            if (key_hit(K_4)) { attempt = 4; }
+            if (key_hit(K_5)) { attempt = 5; }
+            if (attempt >= 0) {
+                int tries = peek(RAM_TRIES) + 1;
+                if (tries > 255) { tries = 0; }
+                poke(RAM_TRIES, tries);
+                if (attempt == expected) {
+                    int correct = peek(RAM_CORRECT) + 1;
+                    if (correct > 255) { correct = 0; }
+                    poke(RAM_CORRECT, correct);
+                    clear();
+                    print_cw(57, 24, "TEST OK");
+                    render();
+                    delay(1000);
+                    return;
+                }
+                // Wrong answer: no TEST OK, return to the launcher.
+                return;
+            }
+            if (key_hit(K_AC)) { return; }
+            delay(1);
+        }
+    }
+}
+
+void run_every_test() {
+    run_display_test();
+    show_version_screen();
+    show_serial_screen();
+    run_key_tests();
+    clear();
+    print_cw(0, 0, "TEST OK");
+    print_cw(0, 16, "RESET");
+    print_cw(0, 51, "Press AC");
+    render();
+    while (key() == K_NONE) { delay(1); }
+    clear_all_memory();
+}

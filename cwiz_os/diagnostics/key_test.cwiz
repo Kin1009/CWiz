@@ -1,0 +1,118 @@
+void draw_key_label(int index) {
+    if (index == 0) { print(0, 24, "PRESS: SHIFT"); return; }
+    if (index == 1) { print(0, 24, "PRESS: ALPHA"); return; }
+    if (index == 2) { print(0, 24, "PRESS: UP"); return; }
+    if (index == 3) { print(0, 24, "PRESS: DOWN"); return; }
+    if (index == 4) { print(0, 24, "PRESS: LEFT"); return; }
+    if (index == 5) { print(0, 24, "PRESS: RIGHT"); return; }
+    if (index == 6) { print(0, 24, "PRESS: MENU"); return; }
+    if (index == 7) { print(0, 24, "PRESS: OPTN"); return; }
+    if (index == 8) { print(0, 24, "PRESS: CALC"); return; }
+    if (index == 9) { print(0, 24, "PRESS: INT"); return; }
+    if (index == 10) { print(0, 24, "PRESS: X"); return; }
+    if (index == 11) { print(0, 24, "PRESS: FRAC"); return; }
+    if (index == 12) { print(0, 24, "PRESS: SQRT"); return; }
+    if (index == 13) { print(0, 24, "PRESS: SQUARED"); return; }
+    if (index == 14) { print(0, 24, "PRESS: POWER"); return; }
+    if (index == 15) { print(0, 24, "PRESS: LOG"); return; }
+    if (index == 16) { print(0, 24, "PRESS: LN"); return; }
+    if (index == 17) { print(0, 24, "PRESS: NEG"); return; }
+    if (index == 18) { print(0, 24, "PRESS: DEG"); return; }
+    if (index == 19) { print(0, 24, "PRESS: INV"); return; }
+    if (index == 20) { print(0, 24, "PRESS: SIN"); return; }
+    if (index == 21) { print(0, 24, "PRESS: COS"); return; }
+    if (index == 22) { print(0, 24, "PRESS: TAN"); return; }
+    if (index == 23) { print(0, 24, "PRESS: STO"); return; }
+    if (index == 24) { print(0, 24, "PRESS: ENG"); return; }
+    if (index == 25) { print(0, 24, "PRESS: ("); return; }
+    if (index == 26) { print(0, 24, "PRESS: )"); return; }
+    if (index == 27) { print(0, 24, "PRESS: S-D"); return; }
+    if (index == 28) { print(0, 24, "PRESS: M+"); return; }
+    if (index == 29) { print(0, 24, "PRESS: 7"); return; }
+    if (index == 30) { print(0, 24, "PRESS: 8"); return; }
+    if (index == 31) { print(0, 24, "PRESS: 9"); return; }
+    if (index == 32) { print(0, 24, "PRESS: DEL"); return; }
+    if (index == 33) { print(0, 24, "PRESS: AC"); return; }
+    if (index == 34) { print(0, 24, "PRESS: 4"); return; }
+    if (index == 35) { print(0, 24, "PRESS: 5"); return; }
+    if (index == 36) { print(0, 24, "PRESS: 6"); return; }
+    if (index == 37) { print(0, 24, "PRESS: MULT"); return; }
+    if (index == 38) { print(0, 24, "PRESS: DIV"); return; }
+    if (index == 39) { print(0, 24, "PRESS: 1"); return; }
+    if (index == 40) { print(0, 24, "PRESS: 2"); return; }
+    if (index == 41) { print(0, 24, "PRESS: 3"); return; }
+    if (index == 42) { print(0, 24, "PRESS: PLUS"); return; }
+    if (index == 43) { print(0, 24, "PRESS: MINUS"); return; }
+    if (index == 44) { print(0, 24, "PRESS: 0"); return; }
+    if (index == 45) { print(0, 24, "PRESS: DOT"); return; }
+    if (index == 46) { print(0, 24, "PRESS: EXP"); return; }
+    if (index == 47) { print(0, 24, "PRESS: ANS"); return; }
+    if (index == 48) { print(0, 24, "PRESS: EXE"); return; }
+}
+
+void test_one_key(int code, int label_index) {
+    clear();
+    print_cw(0, 0, "KEY TEST");
+    draw_key_label(label_index);
+    render();
+    // Ignore the key used to enter this prompt, then advance only on this key.
+    while (key_down(code)) { delay(1); }
+    while (1) {
+        if (key() == code) { break; }
+        delay(1);
+    }
+}
+
+void run_key_tests() {
+    // Physical keypad order from the CW key map; ON is intentionally excluded.
+    test_one_key(K_SHIFT, 0);
+    test_one_key(K_ALPHA, 1);
+    test_one_key(K_UP, 2);
+    test_one_key(K_DOWN, 3);
+    test_one_key(K_LEFT, 4);
+    test_one_key(K_RIGHT, 5);
+    test_one_key(K_MENU, 6);
+    test_one_key(K_OPTN, 7);
+    test_one_key(K_CALC, 8);
+    test_one_key(K_INTEGRAL, 9);
+    test_one_key(K_X, 10);
+    test_one_key(K_FRAC, 11);
+    test_one_key(K_SQRT, 12);
+    test_one_key(K_SQUARED, 13);
+    test_one_key(K_POWER, 14);
+    test_one_key(K_LOG, 15);
+    test_one_key(K_LN, 16);
+    test_one_key(K_NEG, 17);
+    test_one_key(K_DEG, 18);
+    test_one_key(K_INV, 19);
+    test_one_key(K_SIN, 20);
+    test_one_key(K_COS, 21);
+    test_one_key(K_TAN, 22);
+    test_one_key(K_STO, 23);
+    test_one_key(K_ENG, 24);
+    test_one_key(K_LPAREN, 25);
+    test_one_key(K_RPAREN, 26);
+    test_one_key(K_SD, 27);
+    test_one_key(K_MPLUS, 28);
+    test_one_key(K_7, 29);
+    test_one_key(K_8, 30);
+    test_one_key(K_9, 31);
+    test_one_key(K_DEL, 32);
+    test_one_key(K_AC, 33);
+    test_one_key(K_4, 34);
+    test_one_key(K_5, 35);
+    test_one_key(K_6, 36);
+    test_one_key(K_MUL, 37);
+    test_one_key(K_DIV, 38);
+    test_one_key(K_1, 39);
+    test_one_key(K_2, 40);
+    test_one_key(K_3, 41);
+    test_one_key(K_PLUS, 42);
+    test_one_key(K_MINUS, 43);
+    test_one_key(K_0, 44);
+    test_one_key(K_DOT, 45);
+    test_one_key(K_EXP, 46);
+    test_one_key(K_ANS, 47);
+    test_one_key(K_EXE, 48);
+
+}

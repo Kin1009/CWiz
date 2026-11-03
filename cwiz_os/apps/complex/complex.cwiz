@@ -1,0 +1,10 @@
+// Complex application module. Placeholder until complex mode is implemented.
+void complex_app() {
+    clear();
+    print_cw(0, 0, "Complex");
+    print(0, 20, "Complex calculations");
+    print(0, 32, "App module ready");
+    print(0, 56, "AC: Home");
+    render();
+    while (key() == K_NONE) { delay(1); }
+}

@@ -1,0 +1,55 @@
+// Exercise every byte of the 2 KiB fx-580 shadow buffer.
+// The screen begins at byte 32; each visible scanline has a 32-byte stride,
+// with 24 bytes (192 pixels) of display data. Repeating AA/55 across each
+// scanline makes the pattern alternate at every pixel, including byte edges.
+void draw_checkerboard(int reverse) {
+    int address = SB2;
+    int index = 0;
+    int bytes_left;
+    int column;
+    int pattern;
+
+    // The first 23 bytes are status indicators. Alternate their boolean state
+    // so half are on; the reverse phase flips each one.
+    while (index < 23) {
+        poke(address, (index + reverse) & 1);
+        address = address + 1;
+        index = index + 1;
+    }
+
+    // Finish the reserved/status row, then walk all 63 display rows. No divides
+    // or modulo operations in this hot loop; just sequential stores and a row flip.
+    bytes_left = 2048 - 23;
+    column = 23;
+    pattern = reverse ? 0xAA : 0x55;
+    while (bytes_left > 0) {
+        poke(address, pattern);
+        address = address + 1;
+        bytes_left = bytes_left - 1;
+        column = column + 1;
+        if (column == 32) {
+            column = 0;
+            pattern = pattern ^ 0xFF;
+        }
+    }
+    render();
+}
+
+void run_memory_tests() {
+    draw_checkerboard(0);
+    wait_shift();
+
+    draw_checkerboard(1);
+    wait_shift();
+
+    int i = 0;
+    while (i < 2048) { poke(SB2 + i, 0xFF); i = i + 1; }
+    render();
+    wait_shift();
+
+    clear();
+    // One presentation for the final cleared screen; each pattern is otherwise
+    // presented exactly once by draw_checkerboard.
+    render();
+    wait_shift();
+}

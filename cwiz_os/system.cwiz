@@ -1,0 +1,30 @@
+// System bootstrap checks for the CWiz OS.
+
+// The firmware memory-integrity span: DBD0..DBDF must hold 0F 0E ... 01 00.
+// If it does not, RAM is garbage: rewrite the marker, wipe everything except
+// the marker, and jump to the stock reset stub (0:A1CE). The wipe clears
+// D16C..DBCF, then DBE0..FFFF, then D000..D16B last, then resets.
+void init() {
+    int ok = 1;
+    int i = 0;
+    int v = 0x0F;
+    while (i < 16) {
+        if (peek(0xDBD0 + i) != v) { ok = 0; }
+        v = v - 1;
+        i = i + 1;
+    }
+    if (ok != 0) {
+        clearRender();
+        clear();
+    }
+    if (ok == 0) {
+        i = 0;
+        v = 0x0F;
+        while (i < 16) {
+            poke(0xDBD0 + i, v);
+            v = v - 1;
+            i = i + 1;
+        }
+        recover();
+    }
+}

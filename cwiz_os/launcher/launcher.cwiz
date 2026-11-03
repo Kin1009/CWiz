@@ -1,0 +1,166 @@
+// fx-580VN X launcher.
+//
+// The 24 sprites in menu_icons.cwiz are 48x24 icon cells for the 12 stock
+// apps: unselected and selected (rounded inverse box baked in).  The launcher
+// composes the visible 4x2 grid from the sprite table, so adding a custom app
+// only needs two more sprites and an entry in the app list.
+
+const int ICON_BYTES = 144;  // 48 px / 8 * 24 rows
+
+void draw_icon(int x, int y, int app, int selected) {
+    int base = (app * 2 + selected) * ICON_BYTES;
+    int dst = SB2 + y * 32 + (x >> 3);
+    int row = 0;
+    while (row < 24) {
+        int b = 0;
+        while (b < 6) {
+            poke(dst, menu_icons[base]);
+            base = base + 1;
+            dst = dst + 1;
+            b = b + 1;
+        }
+        dst = dst + 26;
+        row = row + 1;
+    }
+}
+
+void print_menu_label(int selected) {
+    if (selected == 0) { print_cw(0, 51, "1:Calculate"); }
+    else if (selected == 1) { print_cw(0, 51, "2:Complex"); }
+    else if (selected == 2) { print_cw(0, 51, "3:Base-N"); }
+    else if (selected == 3) { print_cw(0, 51, "4:Matrix"); }
+    else if (selected == 4) { print_cw(0, 51, "5:Vector"); }
+    else if (selected == 5) { print_cw(0, 51, "6:Statistics"); }
+    else if (selected == 6) { print_cw(0, 51, "7:Distribution"); }
+    else if (selected == 7) { print_cw(0, 51, "8:Table"); }
+    else if (selected == 8) { print_cw(0, 51, "9:Equation/Func"); }
+    else if (selected == 9) { print_cw(0, 51, "A:Inequality"); }
+    else if (selected == 10) { print_cw(0, 51, "B:Verify"); }
+    else { print_cw(0, 51, "C:Ratio"); }
+}
+
+void drain_keys() {
+    while (key() != K_NONE) { delay(1); }
+}
+
+void print_app_name(int selected) {
+    if (selected == 0) { print_cw(0, 18, "1: Calculate"); }
+    else if (selected == 1) { print_cw(0, 18, "2: Complex"); }
+    else if (selected == 2) { print_cw(0, 18, "3: Base-N"); }
+    else if (selected == 3) { print_cw(0, 18, "4: Matrix"); }
+    else if (selected == 4) { print_cw(0, 18, "5: Vector"); }
+    else if (selected == 5) { print_cw(0, 18, "6: Statistics"); }
+    else if (selected == 6) { print_cw(0, 18, "7: Distribution"); }
+    else if (selected == 7) { print_cw(0, 18, "8: Table"); }
+    else if (selected == 8) { print_cw(0, 18, "9: Equation/Func"); }
+    else if (selected == 9) { print_cw(0, 18, "A: Inequality"); }
+    else if (selected == 10) { print_cw(0, 18, "B: Verify"); }
+    else { print_cw(0, 18, "C: Ratio"); }
+}
+
+void show_unimplemented_app(int selected) {
+    clear();
+    print_cw(0, 0, "App not installed");
+    print_app_name(selected);
+    print(0, 56, "AC: Home");
+    render();
+    drain_keys();
+    while (key() == K_NONE) { delay(1); }
+    drain_keys();
+}
+
+void run_selected_app(int selected) {
+    if (selected == 0) { calculate_app(); }
+    else if (selected == 1) { complex_app(); }
+    else { show_unimplemented_app(selected); }
+    drain_keys();
+}
+
+// Direct app shortcuts: 1-9 then A=(-), B=deg, C=x^-1.
+int shortcut_app() {
+    if (key_hit(K_1)) { return 0; }
+    if (key_hit(K_2)) { return 1; }
+    if (key_hit(K_3)) { return 2; }
+    if (key_hit(K_4)) { return 3; }
+    if (key_hit(K_5)) { return 4; }
+    if (key_hit(K_6)) { return 5; }
+    if (key_hit(K_7)) { return 6; }
+    if (key_hit(K_8)) { return 7; }
+    if (key_hit(K_9)) { return 8; }
+    if (key_hit(K_NEG)) { return 9; }
+    if (key_hit(K_DEG)) { return 10; }
+    if (key_hit(K_INV)) { return 11; }
+    return -1;
+}
+
+void draw_frame(int selected, int scroll) {
+    // The sprites cover the whole grid; only the label band needs clearing.
+    int yy = 49;
+    while (yy < 64) { hline(0, 192, yy, 0); yy = yy + 1; }
+    int top = scroll == 0 ? 0 : 4;
+    int bottom = scroll == 0 ? 4 : 8;
+    int c = 0;
+    while (c < 4) {
+        draw_icon(c * 48, 2, top + c, top + c == selected);
+        c = c + 1;
+    }
+    c = 0;
+    while (c < 4) {
+        draw_icon(c * 48, 26, bottom + c, bottom + c == selected);
+        c = c + 1;
+    }
+    // dont you dare uncomment this
+    // hline(0, 192, 48, 1);
+    print_menu_label(selected);
+    render();
+}
+
+void app_launcher() {
+    // Logical 4x3 grid: row 0 = 1-4, row 1 = 5-8, row 2 = 9-C.
+    int selected = 0;
+    int scroll = 0;
+    while (1) {
+        int row = selected >> 2;
+        int column = selected & 3;
+        if (row < scroll) { scroll = row; }
+        if (row > scroll + 1) { scroll = row - 1; }
+        draw_frame(selected, scroll);
+
+        while (1) {
+            // Horizontal wrap: the edge of a row continues on the next/previous row.
+            if (key_hit(K_LEFT)) {
+                if (column > 0) { column = column - 1; }
+                else { column = 3; row = row == 0 ? 2 : row - 1; }
+                selected = row * 4 + column;
+                break;
+            }
+            if (key_hit(K_RIGHT)) {
+                if (column < 3) { column = column + 1; }
+                else { column = 0; row = row == 2 ? 0 : row + 1; }
+                selected = row * 4 + column;
+                break;
+            }
+            if (key_hit(K_UP)) {
+                if (row > 0) { selected = selected - 4; }
+                break;
+            }
+            if (key_hit(K_DOWN)) {
+                if (row < 2) { selected = selected + 4; }
+                break;
+            }
+
+            int direct = shortcut_app();
+            if (direct >= 0) {
+                run_selected_app(direct);
+                break;
+            }
+
+            if (key_hit(K_EXE)) {
+                run_selected_app(selected);
+                break;
+            }
+            if (key_hit(K_AC)) { break; }
+            delay(1);
+        }
+    }
+}

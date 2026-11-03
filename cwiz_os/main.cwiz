@@ -1,0 +1,38 @@
+#include "build/serial_number.cwiz"
+#include "system.cwiz"
+#include "build/version.cwiz"
+#include "diagnostics/diagnostic_menu.cwiz"
+#include "apps/calculate/calculate.cwiz"
+#include "apps/complex/complex.cwiz"
+#include "launcher/menu_icons.cwiz"
+#include "launcher/launcher.cwiz"
+
+// fx-580 RAM exclusions: D16C-D175 Ans, D180-D247 input, D31A-D391 variables,
+// D392-D521 history, D522-D5E9 result, D784-D913 f(x)/g(x). Keep OS data out.
+#define SERIAL_RAM_ADDRESS 0xDBE0
+char serial_ram_span[16] = {CWIZ_SERIAL_BYTE_LIST};
+
+void store_serial_number() {
+    // Copy the packed serial bytes into the DBE0 span.
+    // Diagnostics reads the serial only from 0xDBE0..0xDBEB.
+    int i = 0;
+    while (i < 12) {
+        poke(0xDBE0 + i, serial_ram_span[i]);
+        i = i + 1;
+    }
+}
+
+void main() {
+    // Required first actions: clear the visible LCD and shadow buffer.
+    clearRender();
+    clear();
+
+    init();
+    store_serial_number();
+
+    // Diagnostics is entered only by holding SHIFT+7 during boot.
+    // AC/exit inside diagnostics returns here and halts; it does not jump
+    // back into the launcher.
+    if (key_down(K_SHIFT) && key_down(K_7)) { diagnostic_menu(); }
+    else { app_launcher(); }
+}
