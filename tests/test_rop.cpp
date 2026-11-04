@@ -108,6 +108,55 @@ std::vector<uint8_t> community_launcher(uint8_t code, uint16_t src, uint16_t dst
 
 void wt::run_rop() {
     check("rop: source marker selects backend", wiz::source_is_rop(hello_source()));
+    {
+        // The direct key scanner is the cwapp `__key` loop without OS state.
+        wiz::Assembler a("nX-U16/100");
+        std::string src = "ORG 0\n" + wiz::rop_key_routine_asm();
+        size_t rt = src.rfind("RT");
+        src = src.substr(0, rt) + "B __key_halt\n__key_halt: B __key_halt\n";
+        auto img = a.assemble(src);
+        std::vector<uint8_t> rom(512, 0);
+        for (const auto& kv : img) rom[kv.first] = kv.second;
+        wiz::U8 pressed(rom, {wt::key_pair(40)}, "cwii", 0, 0);
+        std::string why = pressed.run(5000);
+        int got = pressed.r[0] | (pressed.r[1] << 8);
+        check("rop: key() scanner returns the scan index",
+              why.find("halt") != std::string::npos && got == 40,
+              std::to_string(got) + " " + why);
+        wiz::U8 idle(rom, {}, "cwii", 0, 0);
+        std::string why2 = idle.run(5000);
+        int none = idle.r[0] | (idle.r[1] << 8);
+        check("rop: key() scanner returns -1 when no key is down",
+              why2.find("halt") != std::string::npos && none == 0xFFFF,
+              std::to_string(none) + " " + why2);
+    }
+    {
+        const auto r = wiz::build_rop(
+            "#rop\n#for 580\n#org 0xE9E0\n#launcher common\n"
+            "int main() { key(); goto done; done: goto done; }\n", "580");
+        wiz::Assembler a("nX-U16/100");
+        auto img = a.assemble("ORG 0\n" + wiz::rop_key_routine_asm());
+        std::vector<uint8_t> routine;
+        uint32_t n = 0;
+        for (const auto& kv : img) n = std::max(n, kv.first + 1);
+        for (uint32_t i = 0; i < n; i++) routine.push_back(img.count(i) ? img[i] : 0);
+        size_t off = find_seq(r.bytes, routine);
+        std::vector<uint8_t> call_word = word(0xD730 + (uint32_t)off);
+        check("rop: key() emits the direct matrix-scan routine",
+              r.ok && off != kNoPos && has_seq(r.bytes, call_word) &&
+                  r.log.find("__rop_key matrix scan") != std::string::npos,
+              r.error.empty() ? r.log : r.error);
+        const auto ex = wiz::build_rop(
+            "#rop\n#for 580\n#org 0xE9E0\n#launcher common\n"
+            "int main() { setlr(); setsfr(); screen_del();"
+            " print(0x30, 0x01, \"KEY() MATRIX SCAN\"); render(); key();"
+            " goto done; done: goto done; }\n", "580");
+        check("rop: key() example compiles", ex.ok, ex.error);
+        const auto alias = wiz::build_rop(
+            "#rop\n#for 580\n#org 0xE9E0\n#launcher common\n"
+            "int main() { key_scan(); read_key(); goto done; done: goto done; }\n", "580");
+        check("rop: key() aliases compile", alias.ok, alias.error);
+    }
     check("rop: #rop must be the exact directive token",
           !wiz::source_is_rop("#rop is not a thing\nint main() { }\n") &&
               !wiz::source_is_rop("// #rop\nint main() { }\n"));

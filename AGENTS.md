@@ -26,6 +26,17 @@ deleted and took the uncommitted work with it.
 
 - Wiz toolchain docs live in `/Users/kin/Desktop/Wiz/docs`; never put toolchain
   documentation in the emulator repository.
-- Do not commit or push the upstream Wiz repository unless explicitly asked.
 - Emulator commits go to the `preview` branch of
   `Kin1009/CasioEmuMsvc-Mac`, in small subsystem-sized commits.
+
+## Git (agents)
+
+- You may create branches/worktrees and push your own work. Push **only your own
+  commits/branch**, never the whole working tree.
+- Stage explicit paths only. Never `git add -A`, `git add .`, or `git commit -a`.
+- Never force-push or rewrite history that you did not create.
+- Do not switch branches in the shared checkout while other agents are working.
+  For parallel branch work, use `git worktree add ../<area> -b <branch>`.
+- Push to `origin` (`Kin1009/CWiz`), never to the `upstream` remote
+  (`pkdev-en/Wiz`) unless explicitly asked.
+- Do not commit ROMs, `firmware-re/` binaries, `temp/`, or other agents' files.

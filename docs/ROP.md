@@ -159,6 +159,17 @@ Tables use the raw KI/KO words: `up 0x0480`, `down 0x0840`,
 `FC1D=down`, `FC1E=right`, `FC1F=left`; the old ROP notes had this
 transposed (see [`firmware-re/fx580/docs/rop-keymap.md`](../firmware-re/fx580/docs/rop-keymap.md)).
 
+### `key()` in a ROP payload
+
+The cwapp `key()` builtin is not an OS routine: it strobes `F046` and reads
+`F040` directly (the same loop as `runtime.asm __key`).  ROP `key()` appends
+that routine to the payload and chain-calls it, so it needs no `D150` buffer,
+timer, interrupt or OS state.  It returns the 0..63 scan index in `ER0`, or
+`-1` when no key is down; `getkey()`/`getscancode()` remain available when the
+raw KI/KO word is wanted.  The chain word is
+`[routine_lo, routine_hi, 0x30 | segment, 0x30]`, where the routine lives at
+`home + payload_offset` (for the 580 common launcher, `home = 0xD730`).
+
 Caveat: the `er6 = [ea]` step is `0x1C64A`, which also writes
 `ER14, R13..R6` to `D000..D009` and clobbers `R6..R13`/`ER14`. Do not keep
 live ROP variables or the scancode argument block at `D000..D009` across a

@@ -452,3 +452,55 @@ Editor (`RenderFileEditor`):
     Open Editors stub, Edit/Help menus, Ln/Col/LF fake status fields.
 - Terminal startup skips user rc files and installs a `%1~ %#` prompt so the
   workspace path does not wrap or leave stray status markers.
+
+## 16. Final interaction/alignment pass
+
+- Splitters: visible 1 px sidebar/calculator vertical dividers and bottom panel
+  horizontal divider with resize cursors, min/max clamps, double-click reset
+  (sidebar 300, calculator 360, panel 200), persisted in `settings.json`.
+  Document tool tabs can be dragged to reorder; order is kept in memory.
+- Selection: active tabs use the lighter `tabActive` colour; tree/list/menu
+  selections use the lighter `selection` colour, not a darker shade.
+- Tool tab strip: fixed 30 px strip, widths from full labels, tabs outside the
+  viewport are not partially painted, horizontal slider (drag + wheel) with
+  auto-scroll to the active tab.
+- Tab close: the X hit area is inside the tab item (no overlap with the tab
+  selectable), middle-click closes, dirty files open Save/Discard/Cancel.
+- Explorer: explicit New File / New Folder / Refresh / Open Folder buttons,
+  context menu targets the row it was opened on, selection highlight, keyboard
+  shortcuts. Workspace is scanned live.
+- Top chrome is full width and 38 px; title/menu baseline at 8 px from the top,
+  right actions right-aligned with a 12 px margin and vertically centred.
+- Problems: responsive two-line rows on narrow editor columns (severity + code,
+  wrapped message, file:line:col), table columns at wide widths; counted
+  summary, status-bar error/warning counts, click-to-jump, hint tooltips.
+- Update available is a compact 460 px card (title, version, one-line note,
+  Open release page / Later).
+- Lint uses `wiz::lint_source` for both `.cwiz` and `.wz` (all compiler + style
+  rules), captures rule/code/severity/hint/end column, runs on open/save and a
+  650 ms debounce, marks the gutter line, and reports a visible `linter failed`
+  diagnostic if the engine throws. The linter is linked in-process
+  (`wizcore`), so no external `wizlint` lookup is required.
+- Build stamp: `CASIOEMU_BUILD_COMMIT` + `CASIOEMU_BUILD_TIME` from CMake is
+  shown in the status bar and welcome status, e.g. `build 563130a 11-03 14:23`.
+
+### Launch pipeline
+
+The preview bundle is replaced with `ditto`, then SHA-256 of the built and copied
+executables is compared before launch. Current verified executable:
+`/Users/kin/Desktop/Wiz/preview/CasioEmuMsvc.app/Contents/MacOS/CasioEmuMsvc`
+SHA-256 `4a6610d5c45db26a033862e5c62a1d78e76e8dd00ce8281576039c4adbbbc8cf`,
+mtime `2026-11-03 21:31:18`, PID `23741`.
+
+### Evidence
+
+- `Wiz/temp/shots/final-update.png` — compact update card.
+- `Wiz/temp/shots/final-welcome3.png` — Settings tab, aligned Recents.
+- `Wiz/temp/shots/final-recents-crop.png` — Recents alignment crop.
+- `Wiz/temp/shots/final-topleft-crop.png` — top-left chrome crop (native
+  traffic lights are Cocoa-drawn and are not present under the headless SDL
+  dummy driver; title/menu baseline is verified in the drawn chrome).
+- `Wiz/temp/shots/final-tools4.png` / `final-explorer-crop.png` — explorer
+  header, tool tabs, calculator side panel.
+- `Wiz/temp/shots/probs-final.png` — Problems columns/counts and status counts.
+- `Wiz/temp/logs/end-selftest.txt` — full functional self-check `RESULT PASS`.

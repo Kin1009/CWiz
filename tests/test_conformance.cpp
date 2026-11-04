@@ -1,4 +1,5 @@
 // test_conformance.cpp - C11/C17/C23 conformance rows and directive grammar.
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -612,6 +613,36 @@ void wt::run_conformance() {
               bad.empty() ? std::to_string(ran) + " ran, " + std::to_string(skipped) +
                                 " ROP/cwapp skipped"
                           : bad);
+    }
+
+    {
+        // A missing/bogus data dir must fall back to the embedded runtime and
+        // templates, not report "cannot read boot template" and then succeed.
+        namespace fs = std::filesystem;
+        fs::path old_cwd = fs::current_path();
+        std::string saved_dir = wiz::data_dir();
+        std::string scratch = wt::root_path("temp/no_data");
+        std::error_code ec;
+        fs::create_directories(scratch, ec);
+        const char* old_env = std::getenv("WIZ_DATA_DIR");
+        std::string save_env = old_env ? old_env : "";
+        bool had_env = old_env != nullptr;
+        setenv("WIZ_DATA_DIR", (scratch + "/missing").c_str(), 1);
+        wiz::set_data_dir(scratch + "/missing");
+        fs::current_path(scratch, ec);
+        bool ok = false;
+        std::string msg;
+        try {
+            wiz::BuildResult br = wiz::build_cwiz("int R; void main() { R = 1; }", "cwii", "");
+            ok = !br.rom.empty();
+        } catch (const std::exception& e) {
+            msg = e.what();
+        }
+        fs::current_path(old_cwd, ec);
+        wiz::set_data_dir(saved_dir);
+        if (had_env) setenv("WIZ_DATA_DIR", save_env.c_str(), 1);
+        else unsetenv("WIZ_DATA_DIR");
+        check("build: missing data dir falls back to embedded assets", ok, msg);
     }
 
     // ------------------------------------------------------------ directive grammar
