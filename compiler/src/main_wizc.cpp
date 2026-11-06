@@ -10,7 +10,9 @@
 #include "builtin_rom.hpp"
 #include "cli.hpp"
 #include "cpre.hpp"
+#include "cwlink.hpp"
 #include "diag.hpp"
+#include "directives.hpp"
 #include "patch.hpp"
 #include "rop.hpp"
 #include "version.hpp"
@@ -31,11 +33,14 @@ static const char* DOC =
     "(1..12, default 2).  The .bin is then a complete, runnable 256 KB ROM.\n"
     "\n"
     "    wizc [options] file...\n"
+    "    wizc [options] project.cwapplink -o rom.bin\n"
     "\n"
     "Options:\n"
     "  -o FILE              write the ROM image to FILE\n"
     "  --target MODEL       target calculator: 580 or 880   (default: by source)\n"
     "  --cwapp              force the fx-580VN X firmware app target (implies 580)\n"
+    "  --rom FILE           base firmware for #cwapp / .cwapplink (default: bundled 580)\n"
+    "  --force             overwrite non-blank code blocks / patch space\n"
     "  --lang LANG          force input language: wiz | cwiz   (default: by extension)\n"
     "  -S                   stop after assembly: write the .asm listing, no .bin\n"
     "  -E, --pp             preprocess only (expand directives) and print to stdout\n"
@@ -49,6 +54,7 @@ static const char* DOC =
     "  wizc hello.cwiz -o hello.bin\n"
     "  wizc --target 580 game.wz\n"
     "  wizc --target 880 --no-asm demo.cwiz\n"
+    "  wizc project.cwapplink -o multi.bin\n"
     "\n"
     "Targets:\n"
     "  580   ML620906  nX-U16/100  192x63  1 bitplane\n"
@@ -186,10 +192,52 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
     return true;
 }
 
+// The stock ROM a cwapp/link build patches: --rom FILE or the bundled 580.
+static std::vector<uint8_t> cwapp_base_rom(const Cli& args, Diag& d) {
+    if (args.has("rom")) {
+        bool ok = false;
+        std::vector<uint8_t> rom = read_binary_file(args.value("rom"), &ok);
+        if (!ok) d.fatal("cannot read ROM: " + args.value("rom"));
+        return rom;
+    }
+    return std::vector<uint8_t>(kFx580VnRom, kFx580VnRom + kFx580VnRomSize);
+}
+
+static bool compile_link(const std::string& src, const Cli& args, Diag& d) {
+    if (args.has("target") && canonical(args.value("target")) == std::string("cwii"))
+        d.fatal("a .cwapplink project builds fx-580VN X app code; the fx-880BTG has no "
+                "cwapp boot/runtime target",
+                src);
+    std::vector<uint8_t> base = cwapp_base_rom(args, d);
+    CwappLinkResult lr = build_cwapplink(src, base, args.has("force"));
+    for (const std::string& warning : lr.warnings) d.warning(warning, src);
+    if (!lr.ok) {
+        d.error(lr.error, lr.error_file.empty() ? src : lr.error_file, lr.error_line);
+        return false;
+    }
+    std::string bin_path, asm_path;
+    output_paths(src, args.value("output"), bin_path, asm_path);
+    if (!args.has("asm_only") && !write_binary_file(bin_path, lr.rom))
+        d.fatal("cannot write output: " + bin_path);
+    const bool tty = stdout_is_tty();
+    std::fputs(fmt("%s %s -> %s\n", paint("CC", style::OK, tty).c_str(),
+                   bold(src, tty).c_str(), bin_path.c_str())
+                   .c_str(),
+               stdout);
+    std::fputs(fmt("    [cwapplink 580] %zu app(s), %zu bytes ROM\n", lr.apps.size(),
+                   lr.rom.size())
+                   .c_str(),
+               stdout);
+    for (const std::string& line : lr.summary) std::fputs((line + "\n").c_str(), stdout);
+    return true;
+}
+
 static bool compile_one(const std::string& src, const Cli& args, Diag& d) {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (!fs::is_regular_file(src, ec)) d.fatal(fmt("%s: no such file", src.c_str()));
+
+    if (is_cwapplink_path(src)) return compile_link(src, args, d);
 
     bool source_ok = false;
     const std::string source_text = read_text_file(src, &source_ok);
@@ -230,8 +278,19 @@ static bool compile_one(const std::string& src, const Cli& args, Diag& d) {
     // so the .bin is a complete image that wizrun can load directly.
     bool patched = false;
     int patched_slot = br.slot;
-    if (br.cwapp && !asm_only) {
-        std::vector<uint8_t> rom(kFx580VnRom, kFx580VnRom + kFx580VnRomSize);
+    if (br.cwapp && br.cwapp_extra && !asm_only) {
+        CwappLinkResult lr = build_cwapp_single(src, cwapp_base_rom(args, d), args.has("force"));
+        for (const std::string& warning : lr.warnings) d.warning(warning, src);
+        if (!lr.ok) {
+            d.error(lr.error, lr.error_file.empty() ? src : lr.error_file, lr.error_line);
+            return false;
+        }
+        br.rom = std::move(lr.rom);
+        patched = true;
+        patched_slot = lr.apps.empty() ? br.cwapp_slot : lr.apps.front().slot;
+        for (const std::string& line : lr.summary) d.note(line, src);
+    } else if (br.cwapp && !asm_only) {
+        std::vector<uint8_t> rom = cwapp_base_rom(args, d);
         RomPatchReport pr = patch_rom_image(std::move(rom), br, br.slot, false, true);
         for (const std::string& warning : pr.warnings) {
             // The bundled dump is a known variant; do not repeat the hook note.
@@ -282,6 +341,8 @@ int main(int argc, char** argv) {
         {"--output", "output", true},
         {"--target", "target", true},
         {"--cwapp", "cwapp"},
+        {"--rom", "rom", true},
+        {"--force", "force"},
         {"--lang", "lang", true, false, "", {"wiz", "cwiz"}},
         {"-S", "asm_only"},
         {"-E", "pp"},

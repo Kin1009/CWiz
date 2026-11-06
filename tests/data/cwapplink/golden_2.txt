@@ -1,0 +1,6 @@
+# .cwapplink golden fixture: examples/cwapplink/demo.cwapplink
+# base is the bundled fx-580VN X ROM (kFx580VnRom).
+base_sha256 fb775cb6b26b03010a7b14d3223e79a6245a26a49ba44f3b97d5423520de3b39
+output_sha256 b7ed6f1b79ee424117c6ca892273cd64e6afd1dc063c7125fa16549e3e50262a
+apps 2
+mode_count 13

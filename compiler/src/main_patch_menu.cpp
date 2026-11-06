@@ -19,6 +19,7 @@
 
 #include "build.hpp"
 #include "cli.hpp"
+#include "cwlink.hpp"
 #include "common.hpp"
 #include "diag.hpp"
 #include "patch.hpp"
@@ -113,10 +114,18 @@ int main(int argc, char** argv) {
                    (report.app_entry >> 16) & 0xFFFF, report.app_entry & 0xFFFF)
                    .c_str(),
                stdout);
-    std::fputs(fmt("    slot %c keeps its icon and name; selecting it runs the program.\n",
-                   "123456789ABC"[report.slot - 1])
-                   .c_str(),
-               stdout);
+    if (report.slot >= 1 && report.slot <= 12) {
+        std::fputs(fmt("    slot %c keeps its icon and name; selecting it runs the program.\n",
+                       "123456789ABC"[report.slot - 1])
+                       .c_str(),
+                   stdout);
+    } else {
+        const std::string key = slot_key_label(report.slot);
+        std::fputs(fmt("    appended as mode slot %d (key %s); stock menu slots are unchanged.\n",
+                       report.slot, key.empty() ? "-" : key.c_str())
+                       .c_str(),
+                   stdout);
+    }
     std::fputs(fmt("    %s\n",
                    yellow("not tested on real firmware - try it in the emulator first", tty).c_str())
                    .c_str(),

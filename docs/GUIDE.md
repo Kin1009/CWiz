@@ -745,6 +745,18 @@ const int ROWS = 64;
   void main() { ... leave(); }   // built for 580 and for the app
   ```
 
+  In a `.cwapplink` project the same header can declare an extra app with its
+  shortcut slot, text and two icons:
+
+  ```c
+  #for 580
+  #cwapp 13 "My App" unselected.png selected.png
+  ```
+
+  The slot is the shortcut position: 1..12 are the stock menu keys, 13..24 are
+  `D` through `.`, and slots 25 and above have no key. See
+  [CWAPP.md](CWAPP.md) for the project format and limits.
+
 `#include` is the one thing that adds lines; when a diagnostic points inside an included file the
 drivers report that file and line, and `wiz::cwiz_line_origin()` in [API.md](API.md) exposes the
 same map.

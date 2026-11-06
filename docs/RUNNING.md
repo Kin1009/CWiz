@@ -81,6 +81,8 @@ The detail line reports the target, the number of **variables** (2 bytes each) a
 | `-o FILE` | write the ROM image to `FILE` (the `.asm` listing is written next to it) |
 | `--target 580\|880` | target calculator (default: `880`, or `WIZ_TARGET`; a `#cwapp` source implies 580) |
 | `--cwapp` | accepted for old scripts; no longer needed (a `#cwapp` section patches automatically) |
+| `--rom FILE` | base firmware for a `#cwapp` or `.cwapplink` build (default: the bundled 580 ROM) |
+| `--force` | allow a non-blank code block or patch region |
 | `--lang wiz\|cwiz` | force the input language (default: by extension) |
 | `-S` | stop after assembly: write the `.asm` listing, no `.bin` |
 | `-E`, `--pp` | preprocess only: expand directives (CWiz) or pick the target's sections (Wiz) and print the result to stdout, like `gcc -E` |
@@ -338,6 +340,24 @@ $ build/wizrun app.bin 580
 
 The `.bin` is a complete 256 KB ROM with the hook and menu slot already set. `#slot` takes
 `1..12` and must appear after `#cwapp`; without it, slot 2 is used. No `--cwapp` flag is needed.
+
+### Several apps in one ROM (`.cwapplink`)
+
+A project file lists one cwapp source per line. `wizc` compiles each source into its own code
+block and appends each extra app as a firmware mode:
+
+```console
+$ build/wizc examples/cwapplink/demo.cwapplink -o multi.bin
+$ build/wizrun examples/cwapplink/demo.cwapplink
+```
+
+The result is one 262144-byte ROM. `--rom FILE` selects the base firmware and `--force` allows a
+non-blank target. Paths in the manifest are relative to the manifest; icon paths in a `#cwapp`
+line are relative to the source. See [CWAPP.md](CWAPP.md) for the project format, the slot to
+shortcut-key table and the layout.
+
+The Wiz Compiler opens a `.cwapplink` document directly; Build & Run compiles every app, writes a
+session image and reloads the model. The log lists each app's slot, key, entry and size.
 
 The lower-level `patch_menu` tool is still available for patching an external dump:
 

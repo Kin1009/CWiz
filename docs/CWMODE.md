@@ -220,6 +220,14 @@ Two ways to use it:
    it. The stock ROM file on disk is never modified, and the Wiz Compiler's
    "Stock ROM" action switches back.
 
+3. A `.cwapplink` project built by `wizc` or the Wiz Compiler. The project
+   builder compiles each listed source into its own code block, then calls
+   this library once to append the extra apps as modes. The app slot is the
+   shortcut key position: slots 1..12 are the stock menu keys, extras use
+   13..24 (`D` through `.`) and slots 25 and above have no key. New modes use
+   the safe id range `A0..BF`. See [CWAPP.md](CWAPP.md) for the project format,
+   the slot table and the per-app entry proof.
+
 The exact one-hunk menu addition for `Gui/WizToolchain.cpp` (owned by another
 agent) is in `tools/cwmode/integration/WizToolchain-add-modes.patch`. It adds
 "Calculator > Add Modes..." and brings the panel to the front. The panel itself
@@ -283,6 +291,9 @@ table paths were checked.
   are limited only by the free space and the one-byte count field.
 - The Add Modes panel is registered for the 580 and 880 models only. It does
   not replace the Wiz Compiler's own patch actions and does not compile code.
+- A `.cwapplink` project builds fx-580VN X app code. The fx-880BTG has no
+  cwapp boot/runtime target; the 880 path remains the mode-table path described
+  above, with 64x13 text images and an entry that already exists in firmware.
 
 ## Reference layout
 

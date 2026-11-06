@@ -203,5 +203,6 @@ void run_lint();
 void run_fuzz();
 void run_conformance();
 void run_cwmode();
+void run_cwlink();
 
 }  // namespace wt

@@ -54,8 +54,9 @@ system include path.
 | `#error text` | text | CWiz preprocessor | stops compilation |
 | `#include "file"` / `#include <stdint.h>` | string | CWiz preprocessor | project file relative to the including file; angle form only for built-in freestanding headers |
 | `#for TARGET[, TARGET]` | target list | CWiz preprocessor | canonical targets `580`, `880`; `all` in sections |
-| `#cwapp` | none | CWiz preprocessor | must follow `#for 580` |
-| `#slot N` | 1..12 | CWiz preprocessor | after `#cwapp`, at most once |
+| `#cwapp` | none | CWiz preprocessor | legacy app form; must follow `#for 580` |
+| `#cwapp SLOT "TEXT" ICON SELECTED` | arguments | CWiz preprocessor | extra app form; see below |
+| `#slot N` | 1..12 | CWiz preprocessor | legacy form only, after `#cwapp`, at most once |
 | `#binary "file.bin"` | quoted string | CWiz preprocessor, `fwnx` target | full firmware image |
 | `#org ADDR` | address | `#cwapp` metadata, or ROP | ROP payload origin; for `#cwapp` the patch slot chooses the real address, the value is recorded in `CwizPreprocessInfo` |
 | `#rop` | none | ROP | selects the ROP backend; must be the first directive |
@@ -64,6 +65,22 @@ system include path.
 | `#nopad` | none | ROP | no trailing null buffer |
 | `#launcher common [short\|medium\|long] [backup] [main]` | launcher | ROP | canonical launcher; `shared`/`chung` are compatibility aliases |
 | `#launcher simple [address]` | launcher | ROP | simple stub; a bare address (`#launcher 0x8154`) is a compatibility alias |
+
+### `#cwapp` forms
+
+`#cwapp` without arguments is the legacy app-menu patch. It must follow
+`#for 580`, and `#slot n` selects the 1..12 menu slot (default 2). A single
+legacy app keeps the exact bytes of the existing single-file build.
+
+`#cwapp <slot> "<text>" <unselected.png> <selected.png>` declares an extra app
+for a `.cwapplink` project. The slot is the shortcut position (1..24 map to
+`1`..`9`, `A`..`F`, `x`, `y`, `z`, `M`, `+`, `-`, `*`, `/`, `.`; slots 25 and
+above have no key). Icon paths are relative to the source file. This form must
+not use `#slot`; the compiler reports a conflict if both appear. Slots 1..12
+belong to the stock menu and are rejected for extra apps; use the legacy form
+to replace a stock slot. Keyed extra slots 13..24 must be contiguous from 13
+because the firmware labels appended modes by order. See
+[CWAPP.md](CWAPP.md) for the full grammar, layout and limits.
 
 Compatibility aliases are accepted so existing sources keep building. `wizlint`
 reports most of them as `preproc/noncanonical-directive` with the canonical

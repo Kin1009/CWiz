@@ -15,6 +15,7 @@
 #     build/wizlint        lint .wz / .cwiz sources (gcc-style, --json)
 #     build/wiztests       the toolchain test suite
 #     build/cwmode_tests   cwmode ROM fixture (also run by ctest)
+#     build/cwapplink_tests .cwapplink project fixture (also run by ctest)
 cmake_minimum_required(VERSION 3.16)
 project(wiz CXX)
 
@@ -47,6 +48,7 @@ add_library(wizcore STATIC
   src/rop.cpp
   src/lint.cpp
   src/cwmode.cpp
+  src/cwlink.cpp
 )
 target_include_directories(wizcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -78,6 +80,7 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_fuzz.cpp
   ${WIZ_TESTS_DIR}/test_rop.cpp
   ${WIZ_TESTS_DIR}/test_cwmode.cpp
+  ${WIZ_TESTS_DIR}/test_cwlink.cpp
 )
 target_include_directories(wiztests PRIVATE "${WIZ_TESTS_DIR}")
 target_link_libraries(wiztests PRIVATE wizcore)
@@ -92,6 +95,12 @@ add_dependencies(cwmode_tests cwmode)
 enable_testing()
 add_test(NAME toolchain COMMAND wiztests)
 add_test(NAME cwmode COMMAND cwmode_tests)
+
+add_executable(cwapplink_tests ${WIZ_TESTS_DIR}/test_cwlink.cpp ${WIZ_TESTS_DIR}/test_cwlink_main.cpp)
+target_include_directories(cwapplink_tests PRIVATE "${WIZ_TESTS_DIR}")
+target_link_libraries(cwapplink_tests PRIVATE wizcore)
+add_dependencies(cwapplink_tests wizc)
+add_test(NAME cwapplink COMMAND cwapplink_tests)
 
 # Compile the ROM agent's CWiz corpus.  Reports go under <repo>/temp/corpus.
 add_executable(corpus_check src/main_corpus.cpp)

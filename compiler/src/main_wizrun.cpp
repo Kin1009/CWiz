@@ -16,6 +16,7 @@
 #include "cli.hpp"
 #include "common.hpp"
 #include "cpre.hpp"
+#include "cwlink.hpp"
 #include "diag.hpp"
 #include "patch.hpp"
 #include "sim.hpp"
@@ -38,6 +39,8 @@ static const char* DOC =
     "\n"
     "Options:\n"
     "  --target MODEL       calculator model: 580 or 880        (default: 580)\n"
+    "  --rom FILE           base firmware for #cwapp / .cwapplink\n"
+    "  --force              overwrite non-blank code blocks\n"
     "  --steps N            maximum simulated instructions      (default: 3000000)\n"
     "  --keys LIST          keys held for the whole run, e.g. K_UP,K_OK or 0x20,0x28\n"
     "  --press LIST         timed key presses, e.g. K_OK@2000000,K_UP@3000000\n"
@@ -92,6 +95,16 @@ static bool is_patched_580(const std::vector<uint8_t>& rom) {
            rom[0x25E20] == 0x40 && rom[0x25E21] == 0x0E;
 }
 
+static std::vector<uint8_t> cwapp_base_rom(const Cli& args, Diag& d) {
+    if (args.has("rom")) {
+        bool ok = false;
+        std::vector<uint8_t> rom = read_binary_file(args.value("rom"), &ok);
+        if (!ok) d.fatal("cannot read ROM: " + args.value("rom"));
+        return rom;
+    }
+    return std::vector<uint8_t>(kFx580VnRom, kFx580VnRom + kFx580VnRomSize);
+}
+
 int main(int argc, char** argv) {
     g_argv0 = argv[0];
     set_data_dir(autodetect_data_dir(argv[0]));
@@ -99,6 +112,8 @@ int main(int argc, char** argv) {
     std::vector<CliOption> opts = {
         {"--target", "target", true},
         {"--cwapp", "cwapp"},  // accepted from older scripts; now automatic
+        {"--rom", "rom", true},
+        {"--force", "force"},
         {"--steps", "steps", true},
         {"--keys", "keys", true},
         {"--press", "press", true},
@@ -155,9 +170,10 @@ int main(int argc, char** argv) {
     }
 
     const bool binary = is_binary_image(prog);
+    const bool link_project = is_cwapplink_path(prog);
     // A compiled image defaults to the 580; a source keeps wizc's default (880)
     // unless it declares only one machine or the user names a model.
-    if (target.empty()) target = binary ? "580" : DEFAULT_TARGET;
+    if (target.empty()) target = (binary || link_project) ? "580" : DEFAULT_TARGET;
     if (!binary && !explicit_model) {
         // Source convenience: honour a #cwapp section and a source that only
         // declares 880/580, otherwise use the source default.
@@ -189,7 +205,24 @@ int main(int argc, char** argv) {
 
     BuildResult br;
     bool patched = false;
-    if (binary) {
+    uint32_t patched_entry = 0;
+    if (link_project) {
+        if (canonical(target) == std::string("cwii"))
+            d.fatal("a .cwapplink project builds fx-580VN X app code; the fx-880BTG has no "
+                    "cwapp boot/runtime target");
+        CwappLinkResult lr = build_cwapplink(prog, cwapp_base_rom(args, d), args.has("force"));
+        for (const std::string& warning : lr.warnings) d.warning(warning, prog);
+        if (!lr.ok) {
+            d.error(lr.error, lr.error_file.empty() ? prog : lr.error_file, lr.error_line);
+            d.summary();
+            return 1;
+        }
+        for (const std::string& line : lr.summary) d.note(line, prog);
+        br.rom = std::move(lr.rom);
+        patched = true;
+        patched_entry = lr.apps.empty() ? 0 : lr.apps.front().entry;
+        target = "580";
+    } else if (binary) {
         bool ok = false;
         br.rom = read_binary_file(prog, &ok);
         if (!ok) d.fatal("cannot read: " + prog);
@@ -218,8 +251,22 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        if (br.cwapp) {
-            std::vector<uint8_t> rom(kFx580VnRom, kFx580VnRom + kFx580VnRomSize);
+        if (br.cwapp && br.cwapp_extra) {
+            CwappLinkResult lr =
+                build_cwapp_single(prog, cwapp_base_rom(args, d), args.has("force"));
+            for (const std::string& warning : lr.warnings) d.warning(warning, prog);
+            if (!lr.ok) {
+                d.error(lr.error, lr.error_file.empty() ? prog : lr.error_file, lr.error_line);
+                d.summary();
+                return 1;
+            }
+            for (const std::string& line : lr.summary) d.note(line, prog);
+            br.rom = std::move(lr.rom);
+            patched = true;
+            patched_entry = lr.apps.empty() ? 0 : lr.apps.front().entry;
+            target = "580";
+        } else if (br.cwapp) {
+            std::vector<uint8_t> rom = cwapp_base_rom(args, d);
             RomPatchReport pr = patch_rom_image(std::move(rom), br, br.slot, false, true);
             for (const std::string& warning : pr.warnings) {
                 if (pr.hook_forced && warning.rfind("set_mode at", 0) == 0) continue;
@@ -247,7 +294,11 @@ int main(int argc, char** argv) {
 
     int start_csr = -1, start_pc = -1;
     std::vector<std::pair<int, int>> stop;
-    if (patched) {
+    if (patched && patched_entry) {
+        stop.push_back({0, 0xA1CE});
+        start_csr = (patched_entry >> 16) & 0xFFFF;
+        start_pc = patched_entry & 0xFFFF;
+    } else if (patched) {
         stop.push_back({0, 0xA1CE});
         auto it = br.syms.find("_APP");
         if (it != br.syms.end()) {
@@ -270,7 +321,7 @@ int main(int argc, char** argv) {
     }
 
     U8 m(br.rom, keys, tg.name, start_csr, start_pc, stop);
-    if (patched && br.syms.find("_APP") == br.syms.end()) m.r[8] = 0xE0;
+    if (patched && !patched_entry && br.syms.find("_APP") == br.syms.end()) m.r[8] = 0xE0;
 
     std::vector<std::pair<long, std::pair<int, int>>> events;
     for (const std::string& item : split(args.value("press"), ',')) {
