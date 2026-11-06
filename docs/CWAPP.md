@@ -110,8 +110,11 @@ The slot is the on-screen shortcut position. The mapping is:
 | 24 | `.` | `.` |
 | 25 and above | none | none |
 
-The legends with non-ASCII glyphs are written with ASCII-safe equivalents in
-the build log and the editor: `B deg`, `C x^-1`, `z s<>d`.
+The key column is the on-screen label and the hardware legend. It is not the
+emulator's key name. For example, slot 13 is the `D` label with the `sin`
+legend, so the physical `sin` key is the shortcut. The legends with non-ASCII
+glyphs are written with ASCII-safe equivalents in the build log and the editor:
+`B deg`, `C x^-1`, `z s<>d`.
 
 Ordering rules:
 
@@ -213,10 +216,11 @@ The menu slot's mode byte is set to that app's id. Selecting the slot calls
 
 This was checked in CasioEmuMsvc, not only in unit tests: with two legacy apps
 in slots 1 and 2, selecting slot 1 ran app A and slot 2 ran app B. With extra
-apps in slots 13 and 14, the mode menu showed `D:APP B13` and `E:APP A14`; the
-shortcut key order followed the sorted slots, and selecting each ran its own
-app. A thirteen-app project (slots 13 through 25) booted and ran the last app
-as well.
+apps in slots 13 and 14, the mode menu showed `D:APP B13` and `E:APP A14`. The
+shortcut order followed the sorted slots, and pressing the physical keys for
+the `sin` and `cos` legends (slot 13 is `D`/sin, slot 14 is `E`/cos) launched
+APP B13 and APP A14 respectively. A thirteen-app project (slots 13 through 25)
+booted, showed the keyed labels through `.`, and ran the unkeyed slot 25 app.
 
 ## Command line
 
