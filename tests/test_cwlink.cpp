@@ -238,9 +238,11 @@ void check_legacy(TempDir& dir) {
     wt::check("cwapplink multi-legacy: keys 1, 9, A",
               m.apps.size() == 3 && m.apps[0].key == "1" && m.apps[1].key == "9" &&
                   m.apps[2].key == "A");
-    wt::check("cwapplink multi-legacy: dispatcher at 3:0E40",
-              m.rom[0x30E40] == 0xA0 && m.rom[0x30E41] == 0x78 && m.rom[0x30E44] == 0x00 &&
-                  m.rom[0x30E48] == 0xA1 && m.rom[0x30E49] == 0x78);
+    wt::check("cwapplink multi-legacy: dispatcher clears the boot flag then compares ids",
+              m.rom[0x30E40] == 0x00 && m.rom[0x30E41] == 0x00 && m.rom[0x30E42] == 0x11 &&
+                  m.rom[0x30E43] == 0x90 && m.rom[0x30E44] == 0xF4 && m.rom[0x30E45] == 0xE7 &&
+                  m.rom[0x30E46] == 0xA0 && m.rom[0x30E47] == 0x78 &&
+                  m.rom[0x30E4E] == 0xA1 && m.rom[0x30E4F] == 0x78);
     wt::check("cwapplink multi-legacy: hook is B 3:0E40",
               m.rom[0x25E1E] == 0x00 && m.rom[0x25E1F] == 0xF3 && m.rom[0x25E20] == 0x40 &&
                   m.rom[0x25E21] == 0x0E);
@@ -251,6 +253,35 @@ void check_legacy(TempDir& dir) {
             slots_ok = false;
     }
     wt::check("cwapplink multi-legacy: menu slots carry the dispatcher ids", slots_ok);
+
+    // Boot dispatcher at 3:00302: the power-on path relaunches the app whose
+    // mode id is still current, and falls through to the stock menu otherwise.
+    {
+        const uint32_t boot_addr = 0x30E40 + 8 * 3 + 12 + 6;
+        wt::check("cwapplink multi-legacy: boot dispatcher matches ids then sets the flag",
+                  m.rom[boot_addr] == 0xA0 && m.rom[boot_addr + 1] == 0x70 &&
+                      m.rom[boot_addr + 2] == 0x07 && m.rom[boot_addr + 3] == 0xC8 &&
+                      m.rom[boot_addr + 4] == 0x01 && m.rom[boot_addr + 5] == 0x00 &&
+                      m.rom[boot_addr + 6] == 0x11 && m.rom[boot_addr + 7] == 0x90 &&
+                      m.rom[boot_addr + 8] == 0xF4 && m.rom[boot_addr + 9] == 0xE7);
+        wt::check("cwapplink multi-legacy: main hook calls the boot dispatcher",
+                  m.rom[0x29448] == 0x01 && m.rom[0x29449] == 0xF3 &&
+                      m.rom[0x2944A] == (uint8_t)(boot_addr & 0xFF) &&
+                      m.rom[0x2944B] == (uint8_t)((boot_addr >> 8) & 0xFF));
+        const wiz::CwappLinkApp& second = m.apps[1];
+        wiz::U8 b(m.rom, {}, "cwapp", boot_addr >> 16, boot_addr & 0xFFFF,
+                  {{(int)(second.entry >> 16), (int)(second.entry & 0xFFFF)}});
+        b.r[0] = second.mode_code;
+        std::string why = b.run(200000);
+        wt::check("cwapplink multi-legacy: boot dispatch relaunches the second app",
+                  why == wiz::fmt("stop at %X:%04X", second.entry >> 16, second.entry & 0xFFFF),
+                  why);
+        wiz::U8 n(m.rom, {}, "cwapp", boot_addr >> 16, boot_addr & 0xFFFF, {{2, 0xE234}});
+        n.r[0] = 0x0D;
+        why = n.run(200000);
+        wt::check("cwapplink multi-legacy: boot dispatch keeps mode 0D on the menu path",
+                  why == "stop at 2:E234", why);
+    }
 
     // Mixed project: one legacy slot plus one appended mode.
     write_file(dir.path + "/mixed.cwapplink", source + "\napp13mix.cwiz\n");
@@ -266,6 +297,8 @@ void check_legacy(TempDir& dir) {
                       mixed.apps[0].base == 0x30E40 && mixed.apps[1].key == "D" &&
                       mixed.apps[1].base >= 0x30E40 + mixed.apps[0].size);
         wt::check("cwapplink mixed: mode count 11 -> 12", mixed.rom[0x3EA0] == 12);
+        wt::check("cwapplink mixed: main hook goes to the legacy boot dispatcher",
+                  mixed.rom[0x29448] == 0x00 && mixed.rom[0x29449] == 0xF3);
     }
 }
 

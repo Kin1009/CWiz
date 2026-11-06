@@ -2886,7 +2886,10 @@ std::string Compiler::compile(const std::string& src) {
     emit("BL __init");
     if (find_func("main")) emit("BL f_main");
     label("__wiz_halt");
-    emit("B __wiz_halt");
+    if (target.name == "cwapp")
+        emit("B __exit");
+    else
+        emit("B __wiz_halt");
     fn.clear();
     label("__init");
     emit("PUSH LR");

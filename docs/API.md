@@ -59,7 +59,7 @@ languages. You cannot define a function with one of these names. Unless noted, a
 | `renderStatus()` | 0 | — | Copy only the first 23 status bytes from SB2 to the LCD plane(s). |
 | `buffered(on)` | 1 | — | Compatibility no-op. Drawing always targets SB2. |
 | `flip()` | 0 | — | Alias for `render()` (kept for older programs). |
-| `exit()` | 0 | — | **cwapp only.** Leave the program and restart the firmware (returns to the menu). |
+| `exit()` | 0 | — | **cwapp only.** Leave the program through the saved firmware stack and open the firmware mode menu. This is the same clean return as MENU: no reset and no splash. |
 | `_hspan(x0, x1, y, c)` | 4 | — | Internal fast span fill, `x0..x1-1`. Requires `0 <= x0 < x1 <= 192`, `0 <= y < ROWS`. |
 | `ticks()` | 0 | timer count | Free-running Timer0 counter, **8 counts per millisecond**. The timer is started on the first call. |
 | `delay_ms(ms)` | 1 | — | Wait `ms` milliseconds using that timer (calibrated, unlike `delay`). Negative values return immediately. |
@@ -235,6 +235,25 @@ Example: `if key_hit(K_OK): …`
 `K_EXP`=13 `K_ANS`=14 `K_EXE`=15
 
 `K_NONE` is `-1` on both.
+
+### cwapp keys: MENU, AC, ON and OFF
+
+A `cwapp` app owns the CPU, so the firmware keys are handled by the app runtime:
+
+- MENU (`K_MENU`) opens the firmware mode menu through the saved firmware stack
+  and the firmware menu routine. There is no reset and no splash. The runtime
+  performs this check inside `key()`, `key_down()` and `key_hit()`.
+- AC (`K_AC`) is not intercepted. Plain AC is returned to the app like any other
+  key, so `key()` reports 29 and `key_down(K_AC)` works.
+- ON is a repower of the calculator. The firmware then relaunches the app that
+  was running; in a multi-app ROM it relaunches that app, not the first app or
+  the menu.
+- OFF is Shift+AC. It follows the stock power-off path: the runtime turns the
+  LCD off, clears FCON, masks the interrupts, programs STOPACP and enters STOP.
+  ON then repowers the calculator and the firmware relaunches the app.
+
+MENU, ON and OFF are detected while the app polls the key functions. An app
+that never calls `key()`, `key_down()` or `key_hit()` cannot see them.
 
 > These scan codes are transcribed from existing references (`libcw.h`, etc.). They are not all
 > verified against real hardware — see the disclaimer in

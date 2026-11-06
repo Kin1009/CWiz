@@ -175,9 +175,13 @@ passed with `--rom FILE`.
 3. With several legacy apps, a dispatcher is written at `3:0E40`. It compares
    the mode id in `R8` with each legacy id and branches to the matching app's
    `_APP`. It replays the two instructions the hook replaced:
-   `B 2:5E88` for mode 3 and `B 2:5E22` otherwise.
+   `B 2:5E88` for mode 3 and `B 2:5E22` otherwise. A second dispatcher is
+   installed at the firmware main hook (`2:9448`) so ON relaunches the app that
+   was running.
 4. Extra apps are appended to the firmware mode list with the cwmode engine.
-   Each generated mode routine calls the app's own `_APP` entry.
+   Each generated mode routine calls the app's own `_APP` entry. When legacy
+   apps are also present, a small dispatcher in front of the cwmode main hook
+   handles the legacy ids and passes every other id to cwmode.
 5. The cwmode tables and routines are placed after the last code block. The
    builder verifies the complete block fits before `0x40000`.
 
@@ -221,6 +225,31 @@ shortcut order followed the sorted slots, and pressing the physical keys for
 the `sin` and `cos` legends (slot 13 is `D`/sin, slot 14 is `E`/cos) launched
 APP B13 and APP A14 respectively. A thirteen-app project (slots 13 through 25)
 booted, showed the keyed labels through `.`, and ran the unkeyed slot 25 app.
+
+## Leaving and restarting the app
+
+Every cwapp form saves the firmware stack, registers, PSW and LR when `_APP` is
+entered. MENU, `exit()` and returning from `main()` restore that state and call
+the firmware mode-menu routine at `2:AD4C`, so the app leaves to the mode menu
+without a reset or a splash.
+
+- MENU is checked inside `key()`, `key_down()` and `key_hit()`. An app that
+  never polls a key function cannot see it.
+- Plain AC is not intercepted: `key()` reports `K_AC` (29) and the app decides
+  what to do with it.
+- OFF is Shift+AC. The runtime follows the stock power-off path: LCD off, FCON
+  cleared, interrupts masked, STOPACP programmed and STOP entered. ON then
+  repowers the calculator.
+- ON is a repower of the calculator, not an in-place restart. After power-on
+  the firmware relaunches the app that was running. In a multi-app ROM that is
+  the selected app, not the first app and not the menu.
+
+The single legacy app returns through the set_mode continuation (`2:5E22`)
+after the menu call. Multi-legacy projects also patch the firmware main hook at
+`2:9448` with a boot dispatcher: it compares the running mode id in `R0`,
+branches back to that app's `_APP`, and falls through to the stock menu function
+for every other id. A mixed project puts the same small dispatcher in front of
+the cwmode main hook, so both legacy and appended apps relaunch.
 
 ## Command line
 
@@ -286,7 +315,7 @@ Every failure returns no ROM. `wizc` writes no output file on failure.
 ## Tests
 
 `ctest` runs `cwapplink` and `toolchain`. `build/cwapplink_tests` currently
-checks 53 cases:
+checks 58 cases:
 
 - slot keys 1..24, slot 25 and beyond without a key, ASCII-safe legends,
 - manifest comments, blank lines and relative paths,
@@ -295,8 +324,12 @@ checks 53 cases:
   the same base,
 - distinct entries for every appended mode,
 - legacy single app equal byte for byte to the existing patch,
-- three legacy apps with the `R8` dispatcher and keys 1, 9, A,
+- three legacy apps with the `R8` dispatcher and keys 1, 9, A, including the
+  boot dispatcher that relaunches the running app and keeps mode 0D on the menu
+  path,
 - mixed legacy plus extra project,
+- MENU, `exit()` and returning from `main()` call the firmware menu routine at
+  `2:AD4C`; AC is returned to the app; Shift+AC reaches the stock STOP path,
 - duplicate slot, stock-key conflict, keyed gap, non-cwapp source, missing
   source and non-580 base errors,
 - CLI success, duplicate-slot failure with no output, and a single extra

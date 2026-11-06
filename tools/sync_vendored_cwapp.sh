@@ -6,7 +6,8 @@
 # vendored copies must be byte-identical:
 #
 #   build.hpp build.cpp cpre.hpp cpre.cpp targets.cpp patch.hpp patch.cpp
-#   cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp third_party/stb_image.h
+#   cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp asset_fallback.hpp
+#   data/runtime.asm data/template_*.asm third_party/stb_image.h
 #
 # The stable snapshot is deliberately excluded.
 #
@@ -25,7 +26,8 @@ $root/emulator/CasioEmuMsvc/third_party/wiz/src
 $root/../CasioEmuMsvc-Mac/CasioEmuMsvc/third_party/wiz/src
 "
 
-files="build.hpp build.cpp cpre.hpp cpre.cpp targets.cpp patch.hpp patch.cpp cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp"
+files="build.hpp build.cpp cpre.hpp cpre.cpp targets.cpp patch.hpp patch.cpp cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp asset_fallback.hpp"
+data_files="runtime.asm template_ML620906.asm template_ML620909.asm template_cwapp.asm template_fwnx.asm"
 status=0
 for dir in $targets; do
     [ -d "$dir" ] || continue
@@ -43,6 +45,23 @@ for dir in $targets; do
         else
             cp "$src/$f" "$dir/$f"
             echo "updated $dir/$f"
+        fi
+    done
+    data_dir=$(dirname "$dir")/data
+    for f in $data_files; do
+        if [ ! -f "$data_dir/$f" ]; then
+            echo "missing: $data_dir/$f"
+            status=1
+            continue
+        fi
+        if cmp -s "$root/compiler/$f" "$data_dir/$f"; then
+            echo "ok      $data_dir/$f"
+        elif [ "$check" = "1" ]; then
+            echo "DIFFERS $data_dir/$f"
+            status=1
+        else
+            cp "$root/compiler/$f" "$data_dir/$f"
+            echo "updated $data_dir/$f"
         fi
     done
     if [ ! -f "$dir/third_party/stb_image.h" ]; then

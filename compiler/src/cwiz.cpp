@@ -4166,7 +4166,10 @@ public:
         emit("BL __init");
         if (an.has_main) emit("BL f_main");
         label("__wiz_halt");
-        emit("B __wiz_halt");
+        if (target.name == "cwapp")
+            emit("B __exit");
+        else
+            emit("B __wiz_halt");
 
         label("__init");
         emit("PUSH LR");
