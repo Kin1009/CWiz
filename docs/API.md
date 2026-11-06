@@ -252,8 +252,9 @@ A `cwapp` app owns the CPU, so the firmware keys are handled by the app runtime:
   LCD off, clears FCON, masks the interrupts, programs STOPACP and enters STOP.
   ON then repowers the calculator and the firmware relaunches the app.
 
-MENU, ON and OFF are detected while the app polls the key functions. An app
-that never calls `key()`, `key_down()` or `key_hit()` cannot see them.
+MENU and OFF are detected while the app polls the key functions. An app that
+never calls `key()`, `key_down()` or `key_hit()` cannot see them. ON is the
+hardware power key and does not depend on the app polling keys.
 
 > These scan codes are transcribed from existing references (`libcw.h`, etc.). They are not all
 > verified against real hardware — see the disclaimer in
