@@ -11,8 +11,10 @@
 #     build/wizrun         build + run a program in the simulator
 #     build/customromrun   run a ROM image on a CasioEmuMsvc model
 #     build/patch_menu     patch a program into an fx-580VN X firmware dump
+#     build/cwmode         add modes to fx-580VN X / fx-880BTG firmware
 #     build/wizlint        lint .wz / .cwiz sources (gcc-style, --json)
 #     build/wiztests       the toolchain test suite
+#     build/cwmode_tests   cwmode ROM fixture (also run by ctest)
 cmake_minimum_required(VERSION 3.16)
 project(wiz CXX)
 
@@ -44,6 +46,7 @@ add_library(wizcore STATIC
   src/patch.cpp
   src/rop.cpp
   src/lint.cpp
+  src/cwmode.cpp
 )
 target_include_directories(wizcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -52,9 +55,10 @@ add_executable(wizc        src/main_wizc.cpp)
 add_executable(wizrun      src/main_wizrun.cpp)
 add_executable(customromrun src/main_customromrun.cpp)
 add_executable(patch_menu  src/main_patch_menu.cpp)
+add_executable(cwmode      src/main_cwmode.cpp)
 add_executable(wizlint     src/main_wizlint.cpp)
 
-foreach(tool wizc wizrun customromrun patch_menu wizlint)
+foreach(tool wizc wizrun customromrun patch_menu cwmode wizlint)
   target_link_libraries(${tool} PRIVATE wizcore)
 endforeach()
 
@@ -73,13 +77,21 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_conformance.cpp
   ${WIZ_TESTS_DIR}/test_fuzz.cpp
   ${WIZ_TESTS_DIR}/test_rop.cpp
+  ${WIZ_TESTS_DIR}/test_cwmode.cpp
 )
 target_include_directories(wiztests PRIVATE "${WIZ_TESTS_DIR}")
 target_link_libraries(wiztests PRIVATE wizcore)
 add_dependencies(wiztests wizc patch_menu)
 
+# Standalone CTest entry for the cwmode ROM patcher fixture.
+add_executable(cwmode_tests ${WIZ_TESTS_DIR}/test_cwmode.cpp ${WIZ_TESTS_DIR}/test_cwmode_main.cpp)
+target_include_directories(cwmode_tests PRIVATE "${WIZ_TESTS_DIR}")
+target_link_libraries(cwmode_tests PRIVATE wizcore)
+add_dependencies(cwmode_tests cwmode)
+
 enable_testing()
 add_test(NAME toolchain COMMAND wiztests)
+add_test(NAME cwmode COMMAND cwmode_tests)
 
 # Compile the ROM agent's CWiz corpus.  Reports go under <repo>/temp/corpus.
 add_executable(corpus_check src/main_corpus.cpp)

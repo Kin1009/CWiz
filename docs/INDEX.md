@@ -29,7 +29,7 @@ it.
 
 ---
 
-## 1. Wiz docs (`docs/`, 26 `.md` + 3 `.txt` + 2 `.rtf`)
+## 1. Wiz docs (`docs/`, 27 `.md` + 3 `.txt` + 2 `.rtf`)
 
 | Document | Status | What it is | Notes |
 | --- | --- | --- | --- |
@@ -57,6 +57,7 @@ it.
 | [GUIDE.md](GUIDE.md) | **Current** | Wiz/CWiz language guide | Example paths and sample output corrected 2026-11-03 against the current `examples/` layout. |
 | [API.md](API.md) | **Current** | Built-ins, memory map, targets, C++ API, assembler, simulator | Tool list, `wizlint`, `ticks`/`delay_ms`, `fwnx` and the two README links corrected 2026-11-03. |
 | [RUNNING.md](RUNNING.md) | **Current** | Build/run the toolchain, simulator, emulator, firmware patch | Example paths corrected; records the current `wizrun` 880 default-model caveat. |
+| [CWMODE.md](CWMODE.md) | **Current** | Add modes to fx-580VN X / fx-880BTG firmware; C++ port of cw2mode and cwxmode | CLI, ROM hooks/tables, golden-hash tests, Add Modes panel notes. |
 | [STATUS_ICONS.md](STATUS_ICONS.md) | **Current** | LCD status icon layouts and `setStatus` contract | Matches the runtime status/`renderStatus` implementation. |
 | [CLI-DEBUGGER.md](CLI-DEBUGGER.md) | **Current** | `casioctl` CLI debugger and control channel | Describes an **emulator** tool (`$CASIOEMU/tools/casioctl`); scratch paths parameterized 2026-11-03. |
 | [rop-notes/rop-580-guide.txt](rop-notes/rop-580-guide.txt) | **Historical** | Community ROP guide (Vietnamese, UTF-8) | Source material, not project documentation. |

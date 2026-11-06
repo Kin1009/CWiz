@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>cwxmode_oracle</AssemblyName>
+    <RootNamespace>cwxmode_oracle</RootNamespace>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)../../../temp/cwmode/oracle-bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../../../temp/cwmode/oracle-obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(MSBuildThisFileDirectory)../../../temp/cwmode/oracle-obj/</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../reference/cwxmode/Program.cs" />
+    <Compile Include="../oracle/StaticDebugX.cs" />
+    <Compile Include="Shim.cs" />
+  </ItemGroup>
+</Project>

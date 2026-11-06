@@ -1,0 +1,32 @@
+--- a/CasioEmuMsvc/src/Gui/WizToolchain.cpp
++++ b/CasioEmuMsvc/src/Gui/WizToolchain.cpp
+@@ -792,6 +792,17 @@
+ 		std::ofstream stream(path, std::ios::binary);
+ 		if (stream && !data.empty())
+ 			stream.write(data.data(), static_cast<std::streamsize>(data.size()));
++	}
++
++	// Bring the separate "Add Modes" panel to the front.  The panel is
++	// registered next to this window and uses the cwmode library.
++	void OpenAddModesWindow() {
++		for (UIWindow* window : windows) {
++			if (window && window->name && std::strcmp(window->name, "Add Modes") == 0) {
++				window->BringToFront();
++				return;
++			}
++		}
+ 	}
+ 
+ 	// Patch the stock ROM in memory, write the result as a session image and
+@@ -1269,6 +1280,11 @@
+ 				SystemDialogs::OpenFileDialog([this](std::filesystem::path f) {
+ 					PatchCurrentROM(false, f.string());
+ 				});
++			ImGui::Separator();
++			const bool is880 =
++				m_emu && m_emu->ModelDefinition.model_name.find("880") != std::string::npos;
++			if (ImGui::MenuItem("Add Modes...", nullptr, false, Is580() || is880))
++				OpenAddModesWindow();
+ 			if (ImGui::MenuItem("Stock ROM", nullptr, false, !StockRomPath().empty()))
+ 				RestoreStockRom();
+ 			ImGui::EndMenu();

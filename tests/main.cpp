@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
     run_guarded("test_conformance", wt::run_conformance);
     run_guarded("test_fuzz", wt::run_fuzz);
     run_guarded("test_rop", wt::run_rop);
+    run_guarded("test_cwmode", wt::run_cwmode);
 
     std::printf("\n%d checks, %d failure(s)\n", wt::checks(), (int)wt::fails().size());
     if (!wt::fails().empty()) {

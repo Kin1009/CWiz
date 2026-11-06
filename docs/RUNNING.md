@@ -34,6 +34,7 @@ build/wizc           the Wiz / CWiz compiler driver
 build/wizrun         build + run a program in the simulator
 build/customromrun   run a ROM image on a CasioEmuMsvc model
 build/patch_menu     patch a program into an fx-580VN X firmware dump
+build/cwmode         add modes (icon/name/entry) to fx-580VN X or fx-880BTG firmware
 build/wizlint        lint .wz / .cwiz sources (gcc-style or --json)
 build/wiztests       the toolchain test suite
 ```
