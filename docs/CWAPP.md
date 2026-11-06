@@ -251,6 +251,46 @@ branches back to that app's `_APP`, and falls through to the stock menu function
 for every other id. A mixed project puts the same small dispatcher in front of
 the cwmode main hook, so both legacy and appended apps relaunch.
 
+### How `exit()` works
+
+`exit()` is a zero-argument builtin that is only accepted for the cwapp target.
+It does not call the firmware reset vector. It unwinds the app and hands the
+calculator back to the firmware menu:
+
+1. **Entry snapshot.** `_APP` pushes `LR`, `PSW` and `ER0` through `ER14` on the
+   firmware stack, records the stack pointer at `0xE5D3`, and copies the live
+   firmware stack window into `0xE5D5` onwards. The snapshot area ends at
+   `0xE7FF`, below the runtime heap at `0xE820`. The app then switches `SP` to
+   `0xF000` and runs normally.
+2. **Exit.** `exit()`, a MENU key read, or returning from `main()` reaches the
+   generated `__cwapp_return` epilogue. It copies the saved stack back, restores
+   `SP`, `ER14` through `ER0`, `PSW` and `LR`, so the CPU is exactly where the
+   firmware left it when it entered the app.
+3. **Menu call.** The epilogue sets the mode-menu bookkeeping (`D113 = 1`; for
+   appended and re-launched apps also `D111 = 0C1h`), calls the firmware mode
+   menu routine at `2:AD4C`, and continues:
+   - a single legacy app resumes `set_mode` at `2:5E22`,
+   - an appended-mode app returns to the generated mode routine with `pop pc`,
+   - a boot-relaunched app resumes the same `2:5E22` continuation.
+
+The menu routine repaints the display, so the mode menu appears immediately.
+There is no reset, no boot splash and no RAM clear; only the firmware CPU state
+is restored. App variables keep their last values in RAM until something
+overwrites them, which is why a relaunch starts from `_APP` and re-runs the
+program's initialisation.
+
+If the firmware stack was too tight to snapshot (the stack pointer was below
+the save window), `_APP` records a zero pointer and `exit()` falls back to the
+reset handler at `0:A1CE`. That fallback is the only path that looks like a
+reboot; normal builds do not take it.
+
+`exit()` is not a general return statement. Calling it only leaves the app; it
+does not return a value, and it is rejected by the compiler for any target other
+than cwapp. MENU is detected inside `key()`, `key_down()` and `key_hit()`, so a
+program must keep polling one of those functions for the key to be seen. AC is
+never intercepted, and ON is the hardware power key handled by the calculator
+itself.
+
 ## Command line
 
 ```console
