@@ -347,8 +347,8 @@ unchanged, so Vietnamese and ASCII can be mixed in one string.
 CWiz source strings are UTF-8 byte strings.  There are two ways to convert them:
 
 ```c
-// 1. compile time: __normalized__ rewrites the literal to F4 bytes
-__normalized__ rom8 char greeting[32] = "Xin chào Việt Nam";
+// 1. compile time: [[normalized]] rewrites the literal to F4 bytes
+[[rom8, normalized]] char greeting[32] = "Xin chào Việt Nam";
 
 // 2. run time: normalizeText() scans UTF-8 and returns a static buffer
 void main() {
@@ -359,7 +359,7 @@ void main() {
 }
 ```
 
-Size an `__normalized__` array one byte larger than the converted text (or append `\0`) so the
+Size a `[[normalized]]` array one byte larger than the converted text (or append `\0`) so the
 string stays terminated; an unsized array is exactly as long as its bytes.
 
 `normalizeText(s)` takes a ROM string address, reads UTF-8 bytes, and returns the address of a
@@ -373,7 +373,7 @@ source strings are ASCII-only, put UTF-8 bytes in a `rom8` table there.
 You can spell the encoding by hand when you want the bytes to be explicit:
 
 ```c
-rom8 char viet[6] = "\x56\x69\xF4\x3E\x74";   // "Việt": V i F4 3E t
+[[rom8]] char viet[6] = "\x56\x69\xF4\x3E\x74";   // "Việt": V i F4 3E t
 text_cw(0, 2, viet);
 ```
 
@@ -642,9 +642,9 @@ The C-shaped bits:
   int score = 0;                 // a global
   int a, b = 2, *p = &a;         // several declarators on one line
   int values[64], flags[2] = {1, 0};
-  rom  int table[4] = {1, 2, 3, 4};
-  rom8 char msg[20] = "hello";   // a string in ROM
-  rom8 char sprite[8] = "\x18\x3C\x7E\xFF\xFF\x7E\x3C\x18";
+  [[rom]] int table[4] = {1, 2, 3, 4};
+  [[rom8]] char msg[20] = "hello";   // a string in ROM
+  [[rom8]] char sprite[8] = "\x18\x3C\x7E\xFF\xFF\x7E\x3C\x18";
   int inferred[] = {1, 2, 3};    // size comes from the initialiser
   ```
   Local arrays and multi-variable `for` initialisers work too:
@@ -714,7 +714,7 @@ const int ROWS = 64;
 #endif
 
 #ifdef DEBUG                     // DEBUG is never defined by the toolchain
-rom8 char debug_tag[4] = "dbg";
+[[rom8]] char debug_tag[4] = "dbg";
 #endif
 ```
 
@@ -762,7 +762,7 @@ absolute address, `&x` is simply that address and `*p` is a load or a store thro
 int hist[64];
 int total;
 
-rom8 char hello[6] = "hi";
+[[rom8]] char hello[6] = "hi";
 
 void add(int v) {
     int *p = hist;            // an array decays to a pointer to its first element

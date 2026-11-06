@@ -82,37 +82,48 @@ The current aliases are:
 | `#slot 0x2` | `#slot 2` |
 | `#include <unknown.h>` | rejected (no system include path) |
 
-## Custom types: `rom`, `rom8`, `__normalized__`
+## Custom types: declaration attributes
 
-`rom` and `rom8` are **storage-class qualifiers for file-scope arrays/tables**.
-They are not scalar qualifiers, not local variables, and not function
-qualifiers.
+CWiz uses C23 declaration attributes.  They may be combined, comma-separated,
+and must appear before the declaration:
 
-| Language | Canonical form | Meaning |
-|---|---|---|
-| CWiz | `rom int name[N] = { ... };` | N 16-bit words in ROM |
-| CWiz | `rom8 char name[N] = "..." ;` | N bytes in ROM; string literals get a terminating NUL |
-| Wiz | `rom name = [ ... ]` | 16-bit word table in ROM |
-| Wiz | `rom8 name = "..."` | byte string/table in ROM |
+```c
+[[rom]] int table[4] = {1, 2, 3, 4};
+[[rom8]] char text[] = "hi";
+[[normalized]] char utf8[] = "Tiếng Việt";
+[[rom8, normalized, at 0xD180]] char banner[] = "CW";
+[[at(0xD260)]] int pinned;
+[[at [0xD262] ]] int pinned2;       // bracket argument spelling
+```
 
-Rules (one error family: `sema.type-placement` / `preproc.attribute-placement`):
+| Attribute | Meaning |
+|---|---|
+| `[[rom]]` | 16-bit word table in ROM; element type must be `int` |
+| `[[rom8]]` | byte table/string in ROM; element type must be `char` |
+| `[[normalized]]` | compile-time Vietnamese F4 normalization for a `char`/`[[rom8]] char` string array |
+| `[[at <addr>]]` | pin the symbol address; `0x...`, decimal, `[0x...]`, `at(0x...)` |
 
-* `rom` elements are 16-bit (`int`); `rom8` elements are bytes (`char`).
-  `rom char`, `rom8 int`, `rom int*`, `rom8 struct S` are rejected.
-* A declaration with `rom`/`rom8` must be an array with a size or
-  initializer.  Scalars and function parameters are rejected.
-* `rom`/`rom8` are file-scope only.  Use `peek`/`_rpeek` or a pointer for
-  runtime access.
-* `__normalized__` is a CWiz declaration **attribute** for a `char`/`rom8 char`
-  array initialized from a string literal.  Canonical placement is first:
+Rules:
 
-  ```c
-  __normalized__ rom8 char title[20] = "Tiếng Việt";
-  ```
+* `[[rom]]`/`[[rom8]]` are equivalent to the legacy `rom`/`rom8`
+  qualifiers (still accepted for compatibility) and apply only to file-scope
+  arrays.  Element rules, duplicates (`sema.attribute-duplicate`) and
+  conflicts (`sema.attribute-conflict`) are diagnosed.
+* `[[normalized]]` is equivalent to legacy `__normalized__`; it requires a
+  `char` array initialized from a string.  Existing F4 pairs are preserved.
+* RAM `[[at]]` pins a global/local variable or array.  The allocator skips
+  pinned ranges, validates alignment, `var_base..var_limit`, reserved RAM and
+  overlap (`sema.attribute-at-*`).
+* ROM `[[at]]` places the table with an assembler `ORG` at that address.  The
+  address must be inside the ROM window and must not overlap another pinned
+  table.  **Limitation:** the compiler does not know the final code extent
+  until assembly; a ROM address below the generated code is not rejected.
+  Choose an address safely beyond the generated code (for example `0x3000`).
+* Unknown attributes (including namespaced ones) are accepted and ignored, as
+  C23 requires.  `__has_c_attribute(rom|rom8|normalized|at)` returns 1.
 
-  `__normalized__ char buf[N] = "..."` is also accepted (RAM buffer).  It is
-  rejected on `rom int`, non-char arrays, scalars, and functions with
-  `preproc.attribute-placement`.
+Wiz keeps its indentation syntax: `rom name = [...]` and `rom8 name = "..."`
+are the Wiz spellings; `[[...]]` is a CWiz-only surface form.
 
 ## Known lint gaps
 

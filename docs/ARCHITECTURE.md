@@ -167,9 +167,9 @@ Top-level declarations: globals (`int score = 0;`), RAM arrays (`int values[N];`
 (`const int N = 32;`), and ROM tables:
 
 ```c
-rom  int squares[11] = {0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100};
-rom8 char title[20] = "CWiz arrays";
-rom8 char sprite[16] = "\x3C\x3C\x66\x66...";
+[[rom]] int squares[11] = {0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100};
+[[rom8]] char title[20] = "CWiz arrays";
+[[rom8]] char sprite[16] = "\x3C\x3C\x66\x66...";
 ```
 
 There are **no pointers and no structs**, and only one index level (`a[i]`, never `a[i][j]`).

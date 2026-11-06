@@ -186,16 +186,16 @@ are not recombined).  Wiz exposes the same function; its buffer is 256 bytes of 
 Wiz source strings themselves are ASCII-only, so pass a `rom8` byte table containing UTF-8 for
 Vietnamese input.
 
-For a compile-time conversion, prefix a CWiz declaration with `__normalized__`:
+For a compile-time conversion, use the CWiz declaration attribute `[[normalized]]`:
 
 ```c
-__normalized__ rom8 char greeting[32] = "Xin chào Việt Nam";
+[[rom8, normalized]] char greeting[32] = "Xin chào Việt Nam";
 print_cw(2, 2, greeting);
 ```
 
-The marker rewrites the string literals on that line to F4 bytes before lexing.  It is not
-available in Wiz.  Either path avoids a separate F4 pair being drawn as two replacement glyphs;
-writing `"\xF4\x51"` by hand works too.
+The `[[normalized]]` attribute converts the string initializer at compile time; existing F4
+pairs are preserved.  It is not available in Wiz.  Either path avoids a separate F4 pair being
+drawn as two replacement glyphs; writing `"\xF4\x51"` by hand works too.
 
 Vietnamese data is only linked when used.  `text_cw()`/`print_cw()` pull in both `_cw_font`
 (ASCII, 2.4 KB) and `_cw_font_vn` (Vietnamese, 3.5 KB); `normalizeText()` alone pulls in the

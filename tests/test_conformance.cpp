@@ -275,6 +275,105 @@ void wt::run_conformance() {
               std::to_string(var_of(r.m, r.vars, "R")));
     }
 
+    // ------------------------------------------------------------ declaration attributes
+    {
+        Machine r = run("[[rom]] int t[2] = {3, 4}; [[rom8]] char s[] = \"hi\";"
+                        " int R; void main() { R = t[1] + s[0]; }");
+        check("attributes: [[rom]] and [[rom8]]", var_of(r.m, r.vars, "R") == 4 + 'h',
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        wiz::BuildResult br = wiz::build_cwiz(
+            "[[normalized]] char s[] = \"ế\"; int R; void main() { R = 1; }", "cwii");
+        wiz::U8 m(br.rom, {}, "cwii");
+        m.run(1000);
+        int a = br.variables["s"];
+        check("attributes: [[normalized]] emits F4 bytes",
+              m.mem[a] == 0xF4 && m.mem[a + 1] == 0x3A && m.mem[a + 2] == 0,
+              wiz::fmt("%02X %02X %02X", m.mem[a], m.mem[a + 1], m.mem[a + 2]));
+    }
+    {
+        wiz::BuildResult br = wiz::build_cwiz(
+            "[[rom8, normalized, at 0x3000]] char s[] = \"ế\";"
+            " int R; void main() { R = 1; }", "cwii");
+        auto it = br.syms.find("__d_s");
+        check("attributes: combination + ROM [[at]]",
+              it != br.syms.end() && it->second == 0x3000 && br.rom.size() > 0x3002 &&
+                  br.rom[0x3000] == 0xF4 && br.rom[0x3001] == 0x3A,
+              it == br.syms.end() ? "no __d_s" : wiz::fmt("addr=%04X", it->second));
+    }
+    {
+        wiz::BuildResult br = wiz::build_cwiz(
+            "[[at 0xD260]] int x; int R; void main() { x = 7; R = x; }", "cw");
+        wiz::U8 m(br.rom, {}, "cw");
+        m.run(1000);
+        check("attributes: RAM [[at]] pins the address",
+              br.variables.at("x") == 0xD260 && var_of(m, br.variables, "R") == 7,
+              std::to_string(br.variables.at("x")));
+    }
+    {
+        Err e = err_of("[[at 0x0100]] int x; void main() { }", "cw");
+        check("error: RAM [[at]] out of range", e.ok && e.code == "sema.attribute-at-range", e.msg);
+        e = err_of("[[at 0xD261]] int x; void main() { }", "cw");
+        check("error: RAM [[at]] misaligned", e.ok && e.code == "sema.attribute-at-align", e.msg);
+        e = err_of("[[at 0xD180]] int x; void main() { }", "cw");
+        check("error: RAM [[at]] in reserved RAM", e.ok &&
+                  e.code == "sema.attribute-at-reserved", e.msg);
+        e = err_of("[[at 0xD260]] int x; [[at 0xD260]] int y; void main() { }", "cw");
+        check("error: RAM [[at]] overlap", e.ok && e.code == "sema.attribute-at-overlap", e.msg);
+        e = err_of("[[at 0xE000]] rom int t[2]; void main() { }", "cwii");
+        check("error: ROM [[at]] out of ROM", e.ok && e.code == "sema.attribute-at-range", e.msg);
+        e = err_of("[[rom, at 0x3000]] int a[2]; [[rom, at 0x3000]] int b[2];"
+                   " void main() { }", "cwii");
+        check("error: ROM [[at]] overlap", e.ok &&
+                  e.code == "sema.attribute-at-overlap", e.msg);
+    }
+    {
+        wiz::BuildResult br = wiz::build_cwiz(
+            "[[at(0xD260)]] int a; [[at [0xD262] ]] int b; [[at 53860]] int c;"
+            " int R; void main() { a = 1; b = 2; c = 3; R = a + b + c; }", "cw");
+        check("attributes: at(...), [addr] and decimal spellings",
+              br.variables.at("a") == 0xD260 && br.variables.at("b") == 0xD262 &&
+                  br.variables.at("c") == 0xD264);
+    }
+    {
+        wiz::BuildResult br = wiz::build_cwiz(
+            "int R; void main() { [[at 0x9100]] int x = 7; R = x; }", "cwii");
+        wiz::U8 m(br.rom, {}, "cwii");
+        m.run(1000);
+        check("attributes: RAM [[at]] pins a local",
+              var_of(m, br.variables, "R") == 7 && br.full_asm.find("37120") != std::string::npos,
+              wiz::fmt("R=%d", var_of(m, br.variables, "R")));
+    }
+    {
+        Err e = err_of("[[rom]] char t[2]; void main() { }");
+        check("error: [[rom]] element rule", e.ok && e.code == "sema.attribute-rom", e.msg);
+        e = err_of("[[rom8]] int t[2]; void main() { }");
+        check("error: [[rom8]] element rule", e.ok && e.code == "sema.attribute-rom8", e.msg);
+        e = err_of("[[normalized]] int t[3] = {1, 2, 3}; void main() { }");
+        check("error: [[normalized]] placement", e.ok &&
+                  e.code == "sema.attribute-normalized", e.msg);
+        e = err_of("[[rom, rom]] int t[2]; void main() { }");
+        check("error: duplicate attribute", e.ok &&
+                  e.code == "sema.attribute-duplicate", e.msg);
+        e = err_of("[[rom, rom8]] int t[2]; void main() { }");
+        check("error: conflicting attributes", e.ok &&
+                  e.code == "sema.attribute-conflict", e.msg);
+    }
+    {
+        Machine r = run("[[gnu::unused]] int x = 4; int R; void main() { R = x; }");
+        check("attributes: unknown attributes are ignored", var_of(r.m, r.vars, "R") == 4,
+              std::to_string(var_of(r.m, r.vars, "R")));
+    }
+    {
+        Machine r = run("#if __has_c_attribute(rom) && __has_c_attribute(rom8) &&"
+                        " __has_c_attribute(normalized) && __has_c_attribute(at) &&"
+                        " !__has_c_attribute(unknown_attr)\nint R;\nvoid main(){R=1;}\n"
+                        "#else\nint R;\nvoid main(){R=0;}\n#endif\n");
+        check("attributes: __has_c_attribute covers the supported four",
+              var_of(r.m, r.vars, "R") == 1);
+    }
+
     // ------------------------------------------------------------ freestanding headers
     {
         Machine r = run("#include <stdint.h>\n#include <limits.h>\n#include <stddef.h>\n"
@@ -498,7 +597,8 @@ void wt::run_conformance() {
                             flag("non-freestanding angle include");
                     }
                     const bool comment = (t.rfind("//", 0) == 0 || t.rfind("/*", 0) == 0);
-                    if (ext == ".cwiz" && !comment) {
+                    if (ext == ".cwiz" && !comment &&
+                        t.find("[[rom") == std::string::npos) {
                         size_t r8 = t.find("rom8");
                         if (r8 != std::string::npos && r8 + 4 < t.size() &&
                             t.compare(r8 + 4, 5, " char") != 0)

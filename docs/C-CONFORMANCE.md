@@ -59,13 +59,18 @@ every pass.
 | `auto` type inference | Semantic subset | `test_conformance.cpp` | inferred from the initializer |
 | `static_assert` with one argument | Full | `test_conformance.cpp` | |
 | `[[nodiscard]]`, `[[maybe_unused]]`, `[[deprecated]]`, `[[fallthrough]]`, `[[noreturn]]` | Syntax-only | `test_conformance.cpp` | parsed and ignored |
+| declaration attribute syntax (`[[...]]`, comma lists, nested, namespaced) | Full | `test_conformance.cpp` | unknown attributes accepted and ignored |
+| `[[rom]]` / `[[rom8]]` | Full | `test_conformance.cpp` | equivalent to the legacy qualifiers; `int` / `char` element rules |
+| `[[normalized]]` | Full | `test_conformance.cpp` | F4 rewrite of a `char` string array; byte-identical to `__normalized__` |
+| `[[at <addr>]]` (RAM) | Full | `test_conformance.cpp` | pins the allocator; range/alignment/reserved/overlap diagnosed |
+| `[[at <addr>]]` (ROM table) | Semantic subset | `test_conformance.cpp` | `ORG` placement; final code extent is only known at assembly, so a low address is not rejected |
 | `#elifdef`, `#elifndef` | Full | `test_conformance.cpp` | |
 | `#embed` | Full | `test_conformance.cpp` | expands a binary file to a byte list |
 | digit separators (`1'000'000`) | Full | `test_conformance.cpp` | |
 | binary literals (`0b1010`) | Full | `test_conformance.cpp` | |
 | `u8` character literals, `char8_t` | Semantic subset | `test_conformance.cpp` | bytes; no Unicode execution encoding |
 | `_BitInt(N)` | Semantic subset | `test_conformance.cpp` | N <= 16; N > 16 is a target limitation |
-| `__has_include`, `__has_c_attribute` | Full | `test_conformance.cpp` | |
+| `__has_include`, `__has_c_attribute` | Full | `test_conformance.cpp` | `__has_c_attribute` recognises `rom`, `rom8`, `normalized`, `at` |
 | `unreachable()` | Semantic subset | `test_conformance.cpp` | prelude function parks the CPU |
 | `memccpy` | Full | `test_conformance.cpp` | prelude |
 | `strdup`, `strndup` | Semantic subset | `test_conformance.cpp` | fixed 512-byte arena, never freed |
@@ -111,7 +116,7 @@ every pass.
 | `#elifdef`, `#elifndef` | Full | `test_conformance.cpp` | |
 | `#line` | Full | `test_conformance.cpp` | remaps diagnostics |
 | `#embed` | Full | `test_conformance.cpp` | |
-| `__has_include`, `__has_c_attribute` | Full | `test_conformance.cpp` | |
+| `__has_include`, `__has_c_attribute` | Full | `test_conformance.cpp` | `__has_c_attribute` recognises `rom`, `rom8`, `normalized`, `at` |
 
 ## Experiments and target limitations
 
