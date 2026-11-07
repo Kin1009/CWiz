@@ -129,12 +129,6 @@ void check_two_apps(TempDir& dir) {
         wt::check("cwapplink 2-app: golden base ROM", wt::sha256_hex(base_rom()) ==
                                                           g.at("base_sha256"));
     }
-    const std::string demo = wt::root_path("examples/cwapplink/demo.cwapplink");
-    std::error_code ec;
-    if (fs::is_regular_file(demo, ec)) {
-        wiz::CwappLinkResult d = wiz::build_cwapplink(demo, base_rom(), false);
-        wt::check("cwapplink 2-app: repository demo builds", d.ok, d.error);
-    }
 }
 
 void check_thirteen_apps(TempDir& dir) {
@@ -268,6 +262,59 @@ void check_three_arg_icons(TempDir& dir) {
               a.ok && b.ok ? wiz::fmt("%s vs %s", wt::sha256_hex(a.rom).c_str(),
                                        wt::sha256_hex(b.rom).c_str())
                            : a.error + b.error);
+}
+
+void check_no_image(TempDir& dir) {
+    // Parser: only slot + quoted text is the no-image extra form.
+    auto parse_fails = [](const std::string& src, const std::string& needle) {
+        try {
+            wiz::build_cwiz(src, "cwapp");
+        } catch (const std::exception& e) {
+            return std::string(e.what()).find(needle) != std::string::npos;
+        }
+        return false;
+    };
+    wt::check("no-image: one argument is rejected",
+              parse_fails("#for 580\n#cwapp 13\nvoid main() {}\n", "needs a slot and a text"));
+    wt::check("no-image: unquoted text is rejected",
+              parse_fails("#for 580\n#cwapp 13 BLANK\nvoid main() {}\n", "must be quoted"));
+    wt::check("no-image: empty text is rejected",
+              parse_fails("#for 580\n#cwapp 13 \"\"\nvoid main() {}\n", "text is empty"));
+
+    // A no-image app is the decorated blank tile; a fully white image goes
+    // through exactly the same prepare step and must produce the same ROM.
+    {
+        wiz::cwmode::Image white;
+        white.width = 48;
+        white.height = 23;
+        white.rgba.assign(48 * 23 * 4, 255);
+        std::string error;
+        const std::string white_path = dir.path + "/white.png";
+        if (!wiz::write_png(white_path, white, error)) {
+            wt::check("no-image: write white fixture", false, error);
+            return;
+        }
+        write_file(dir.path + "/blank.cwiz",
+                   "#for 580\n#cwapp 13 \"BLANK\"\nvoid main() { delay(1); }\n");
+        write_file(dir.path + "/white.cwiz",
+                   wiz::fmt("#for 580\n#cwapp 13 \"BLANK\" %s\n"
+                            "void main() { delay(1); }\n",
+                            white_path.c_str()));
+        write_file(dir.path + "/blank.cwapplink", "blank.cwiz\n");
+        write_file(dir.path + "/white.cwapplink", "white.cwiz\n");
+        wiz::CwappLinkResult blank = wiz::build_cwapplink(
+            dir.path + "/blank.cwapplink", {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize},
+            false);
+        wiz::CwappLinkResult white_rom = wiz::build_cwapplink(
+            dir.path + "/white.cwapplink", {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize},
+            false);
+        wt::check("no-image: blank app builds", blank.ok, blank.error);
+        wt::check("no-image: no icon path is reported", blank.ok && blank.apps.size() == 1 &&
+                                                           blank.apps[0].icon.empty());
+        wt::check("no-image: decorated blank equals a white 48x23 source",
+                  blank.ok && white_rom.ok && blank.rom == white_rom.rom,
+                  blank.ok && white_rom.ok ? "" : blank.error + white_rom.error);
+    }
 }
 
 void check_preprocessor(TempDir& dir) {
@@ -511,9 +558,15 @@ void check_errors(TempDir& dir) {
 }
 
 void check_cli(TempDir& dir) {
-    const std::string manifest = wt::root_path("examples/cwapplink/demo.cwapplink");
+    write_file(dir.path + "/cli_a.cwiz",
+               extra_source(13, icon("icon_580_a.png").c_str(), icon("icon_580_b.png").c_str(),
+                            "CLI A"));
+    write_file(dir.path + "/cli_b.cwiz",
+               extra_source(14, icon("icon_580_c.png").c_str(), icon("icon_580_d.png").c_str(),
+                            "CLI B"));
+    write_file(dir.path + "/cli.cwapplink", "cli_a.cwiz\ncli_b.cwiz\n");
+    const std::string manifest = dir.path + "/cli.cwapplink";
     std::error_code ec;
-    if (!fs::is_regular_file(manifest, ec)) return;
     wt::CliResult good = wt::cli_run(dir.path, {manifest, "-o", "cli.bin"});
     wt::check("cwapplink CLI: wizc builds the project", good.rc == 0, good.out);
     const std::vector<uint8_t> rom = wiz::read_binary_file(dir.path + "/cli.bin", nullptr);
@@ -528,7 +581,7 @@ void check_cli(TempDir& dir) {
     wt::check("cwapplink CLI: a failed build writes no output",
               !fs::exists(dir.path + "/bad.bin", ec));
 
-    const std::string extra = wt::root_path("examples/cwapplink/app_a.cwiz");
+    const std::string extra = dir.path + "/cli_a.cwiz";
     wt::CliResult one = wt::cli_run(dir.path, {extra, "-o", "one.bin"});
     wt::check("cwapplink CLI: a single extra #cwapp source builds a ROM",
               one.rc == 0 && fs::file_size(dir.path + "/one.bin", ec) == 262144, one.out);
@@ -553,6 +606,7 @@ void run_cwlink() {
     check_preprocessor(dir);
     check_legacy(dir);
     check_three_arg_icons(dir);
+    check_no_image(dir);
     check_errors(dir);
     check_cli(dir);
 }

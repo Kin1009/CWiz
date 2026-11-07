@@ -68,13 +68,20 @@ Rules:
 #for 580
 #cwapp 13 "My App" unselected.png selected.png
 #cwapp 13 "My App" unselected.png
+#cwapp 13 "My App"
 ```
 
 - The first argument is the app slot and shortcut position. It must be a
   positive integer.
-- The second argument is the mode text. Use quotes when it contains spaces.
-- The icon arguments are one or two image files. Paths are relative to the
-  source file. The builder applies the stock tile decoration to the unselected
+- The second argument is the mode text. It is required. Use quotes when it
+  contains spaces; with no icon paths it must be quoted.
+- The icon arguments are optional: no path, one path, or two paths. Paths are
+  relative to the source file. With no path the builder synthesizes a blank
+  48x23 (or 64x16) tile and applies the same stock decoration, so the
+  unselected icon is just the right/bottom border and the empty shortcut-key
+  box. The selected variant is the exact inverse, a filled tile with the
+  inverted border and box.
+- The builder applies the stock tile decoration to any provided unselected
   image automatically (threshold, crop/pad/scale, right/bottom border and the
   shortcut-key box); running `cwicon` first is optional.
 - With one icon, the selected variant is the exact inverse of the decorated
@@ -448,7 +455,7 @@ Every failure returns no ROM. `wizc` writes no output file on failure.
 ## Tests
 
 `ctest` runs `cwapplink` and `toolchain`. `build/cwapplink_tests` currently
-checks 69 cases:
+checks 74 cases:
 
 - slot keys 1..24, slot 25 and beyond without a key, ASCII-safe legends,
 - manifest comments, blank lines and relative paths,

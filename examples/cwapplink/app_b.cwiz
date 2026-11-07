@@ -1,6 +1,6 @@
 // Extra app B: slot 14 is the E shortcut key.
 #for 580
-#cwapp 14 "Hello B" icon_b.png
+#cwapp 14 "Hello B"
 void main() {
     clear();
     print(4, 8, "Hello app B");
