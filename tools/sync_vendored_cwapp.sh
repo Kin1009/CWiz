@@ -33,8 +33,13 @@ for dir in $targets; do
     [ -d "$dir" ] || continue
     for f in $files; do
         if [ ! -f "$dir/$f" ]; then
-            echo "missing: $dir/$f"
-            status=1
+            if [ "$check" = "1" ]; then
+                echo "missing: $dir/$f"
+                status=1
+            else
+                cp "$src/$f" "$dir/$f"
+                echo "added   $dir/$f"
+            fi
             continue
         fi
         if cmp -s "$src/$f" "$dir/$f"; then
@@ -50,8 +55,13 @@ for dir in $targets; do
     data_dir=$(dirname "$dir")/data
     for f in $data_files; do
         if [ ! -f "$data_dir/$f" ]; then
-            echo "missing: $data_dir/$f"
-            status=1
+            if [ "$check" = "1" ]; then
+                echo "missing: $data_dir/$f"
+                status=1
+            else
+                cp "$root/compiler/$f" "$data_dir/$f"
+                echo "added   $data_dir/$f"
+            fi
             continue
         fi
         if cmp -s "$root/compiler/$f" "$data_dir/$f"; then

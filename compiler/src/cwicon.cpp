@@ -191,6 +191,17 @@ cwmode::Image prepare_icon(const cwmode::Image& source, int model, int threshold
         // Stock cell separator: one pixel on the right and bottom edges.
         for (int y = 1; y < style.height - 1; y++) set_ink(out, style.width - 2, y, true);
         for (int x = 1; x < style.width - 2; x++) set_ink(out, x, style.height - 1, true);
+        // Shortcut-key box.  Measured from the stock 48x23 bitmaps (menu table
+        // at 0x7FF8): x 38..46, y 12..21, with the top-left pixel rounded off.
+        // The firmware draws the key digit in this white box in black, so the
+        // box itself is empty.  It is painted after the artwork.
+        const int bx0 = is_880(model) ? 54 : 38;
+        const int bx1 = is_880(model) ? 62 : 46;
+        const int by0 = is_880(model) ? 8 : 12;
+        const int by1 = is_880(model) ? 14 : 21;
+        for (int y = by0; y <= by1; y++)
+            for (int x = bx0; x <= bx1; x++) set_ink(out, x, y, true);
+        set_ink(out, bx0, by0, false);
     }
     return out;
 }

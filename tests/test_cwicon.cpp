@@ -66,6 +66,33 @@ void wt::run_cwicon() {
               is_ink(prepared, 45, 22) && !is_ink(prepared, 46, 0) && !is_ink(prepared, 0, 22));
     const std::vector<uint8_t> raw = pack_icon(prepared, 580);
     check("cwicon 580: packed length is 0x8A", raw.size() == 0x8A);
+    // Stock key box: x 38..46, y 12..21, with the top-left pixel rounded off.
+    // The golden mask locks the exact border/box geometry.
+    std::vector<uint8_t> mask(0x8A, 0);
+    for (int y = 1; y <= 21; y++) mask[y * 6 + (46 >> 3)] |= (uint8_t)(0x80 >> (46 & 7));
+    for (int x = 1; x <= 45; x++) mask[22 * 6 + (x >> 3)] |= (uint8_t)(0x80 >> (x & 7));
+    for (int y = 12; y <= 21; y++)
+        for (int x = 38; x <= 46; x++) mask[y * 6 + (x >> 3)] |= (uint8_t)(0x80 >> (x & 7));
+    mask[12 * 6 + (38 >> 3)] &= (uint8_t) ~(0x80 >> (38 & 7));
+    check("cwicon 580: border/key-box mask golden hash",
+          wt::sha256_hex(mask) ==
+              "1788b7b79495b13f1bfd930234e7196aecaa1379c8c03e7dcadcd56a28fb119c",
+          wt::sha256_hex(mask));
+    bool box_ok = true;
+    for (size_t i = 0; i < raw.size(); i++)
+        if ((raw[i] & mask[i]) != mask[i]) box_ok = false;
+    check("cwicon 580: border and key box are painted over the artwork", box_ok);
+    const std::vector<uint8_t> stock_raw = [&] {
+        const std::vector<uint8_t> rom(wiz::kFx580VnRom,
+                                      wiz::kFx580VnRom + wiz::kFx580VnRomSize);
+        const int off = rom[0x7FF8 + 6] | (rom[0x7FF8 + 7] << 8);  // slot 2
+        return std::vector<uint8_t>(rom.begin() + off, rom.begin() + off + 0x8A);
+    }();
+    bool stock_box = true;
+    for (size_t i = 0; i < mask.size(); i++)
+        if ((stock_raw[i] & mask[i]) != mask[i]) stock_box = false;
+    check("cwicon 580: measured box matches the stock slot-2 bitmap", stock_box);
+
     const cwmode::Image round = unpack_icon(raw, 580);
     bool same = round.width == prepared.width && round.height == prepared.height;
     for (size_t i = 0; same && i < prepared.rgba.size(); i += 4)
@@ -100,7 +127,7 @@ void wt::run_cwicon() {
     const cwmode::Image small_prepared = prepare_icon(small, 580, 128, true);
     check("cwicon pad: a 24x12 source is centred with background margins",
           !is_ink(small_prepared, 1, 1) && is_ink(small_prepared, 17, 7) &&
-              !is_ink(small_prepared, 44, 20));
+              !is_ink(small_prepared, 44, 5) && is_ink(small_prepared, 44, 20));
     const cwmode::Image wide_prepared = prepare_icon(wide, 580, 128, true);
     check("cwicon aspect: a 96x10 source is scaled to fit and padded",
           !is_ink(wide_prepared, 1, 1) && is_ink(wide_prepared, 20, 11));

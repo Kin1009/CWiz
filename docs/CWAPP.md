@@ -75,10 +75,11 @@ Rules:
 - The second argument is the mode text. Use quotes when it contains spaces.
 - The icon arguments are one or two 48x23 images. Paths are relative to the
   source file. With one icon, the selected variant is the exact inverse of the
-  unselected image: transparent pixels are flattened over white, the RGB
-  channels are inverted and the result is stored opaque. On the packed 1-bit
-  580 icon and the two-plane 880 icon the selected variant is the bitwise
-  complement of the packed bytes.
+  finished unselected bitmap, including its border and shortcut-key box. For a
+  decoded image, transparent pixels are flattened over white, the RGB channels
+  are inverted and the result is stored opaque. On the packed 1-bit 580 icon and
+  the two-plane 880 icon the selected variant is the bitwise complement of the
+  packed bytes.
 - `#slot` must not be used with this form. The compiler reports
   `#slot is not used with '#cwapp <slot> <text> <image> [<selected>]'` when
   both appear.
@@ -159,8 +160,25 @@ variant, bake the highlight into the stored icon.
 
 `cwicon` turns ordinary artwork into the stock app-menu icon style and prints
 the exact packed bytes the firmware stores. It uses a 48x23 one-bit canvas on
-the 580 and a 64x16 two-plane canvas on the 880, with the stock one-pixel
-separator on the right and bottom edges.
+the 580 and a 64x16 two-plane canvas on the 880.
+
+Stock tile decoration, painted on top of the artwork so a bright image cannot
+erase it:
+
+- 1 px separator on the right edge and the bottom edge.
+- A filled shortcut-key box at the bottom-right. On the 580 the box is
+  `x=38..46`, `y=12..21`, with the top-left pixel `(38,12)` rounded off. This is
+  measured from the stock ROM icons in the menu table at `0x7FF8`. The firmware
+  draws the key digit inside it in black, so the box itself stays empty.
+- On the 880 the same decoration is scaled: separator at `x=62` and `y=15`, box
+  `x=54..62`, `y=8..14`, rounded top-left corner.
+- The selected icon is the exact bitwise inverse of the finished unselected
+  bitmap, so border, box and artwork all invert.
+
+The `-o` PNG keeps the compiler input convention: dark pixels are ink and
+become 1 in the packed bytes. In the packed/LCD bitmap, and in the stock
+reference dumps, 1 is white, so the border and box are white there. Use
+`--raw` or unpack the bytes to inspect that polarity.
 
 ```console
 $ build/cwicon --model 580 logo.png -o app_icon.png --raw app_icon.bin \
