@@ -99,6 +99,13 @@ void wt::run_cwicon() {
         if (prepared.rgba[i] != round.rgba[i]) same = false;
     check("cwicon 580: pack/unpack is pixel-exact", same);
 
+    const cwmode::Image prepared_twice = prepare_icon(prepared, 580, 128, true);
+    bool idempotent = prepared_twice.width == prepared.width &&
+                      prepared_twice.height == prepared.height;
+    for (size_t i = 0; idempotent && i < prepared.rgba.size(); i += 4)
+        if (prepared.rgba[i] != prepared_twice.rgba[i]) idempotent = false;
+    check("cwicon 580: decorating an already decorated icon is idempotent", idempotent);
+
     const cwmode::Image inverse = cwmode::invert_image(prepared);
     const std::vector<uint8_t> raw_inverse = pack_icon(inverse, 580);
     bool complement = raw.size() == raw_inverse.size();

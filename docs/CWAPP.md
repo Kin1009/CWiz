@@ -73,13 +73,19 @@ Rules:
 - The first argument is the app slot and shortcut position. It must be a
   positive integer.
 - The second argument is the mode text. Use quotes when it contains spaces.
-- The icon arguments are one or two 48x23 images. Paths are relative to the
-  source file. With one icon, the selected variant is the exact inverse of the
-  finished unselected bitmap, including its border and shortcut-key box. For a
-  decoded image, transparent pixels are flattened over white, the RGB channels
-  are inverted and the result is stored opaque. On the packed 1-bit 580 icon and
-  the two-plane 880 icon the selected variant is the bitwise complement of the
+- The icon arguments are one or two image files. Paths are relative to the
+  source file. The builder applies the stock tile decoration to the unselected
+  image automatically (threshold, crop/pad/scale, right/bottom border and the
+  shortcut-key box); running `cwicon` first is optional.
+- With one icon, the selected variant is the exact inverse of the decorated
+  unselected bitmap, including its border and shortcut-key box. For a decoded
+  image, transparent pixels are flattened over white, the RGB channels are
+  inverted and the result is stored opaque. On the packed 1-bit 580 icon and the
+  two-plane 880 icon the selected variant is the bitwise complement of the
   packed bytes.
+- With two icons, the provided selected image is decorated too. Decoration is
+  idempotent: a target-size image that already contains the stock border and
+  box is thresholded in place instead of being cropped a second time.
 - `#slot` must not be used with this form. The compiler reports
   `#slot is not used with '#cwapp <slot> <text> <image> [<selected>]'` when
   both appear.
@@ -159,8 +165,10 @@ variant, bake the highlight into the stored icon.
 ## Icon conversion (`cwicon`)
 
 `cwicon` turns ordinary artwork into the stock app-menu icon style and prints
-the exact packed bytes the firmware stores. It uses a 48x23 one-bit canvas on
-the 580 and a 64x16 two-plane canvas on the 880.
+the exact packed bytes the firmware stores. The `#cwapp` builder applies the
+same decoration step, so `cwicon` is only needed to inspect the result, produce
+raw bytes, or tune the threshold. It uses a 48x23 one-bit canvas on the 580 and
+a 64x16 two-plane canvas on the 880.
 
 Stock tile decoration, painted on top of the artwork so a bright image cannot
 erase it:
@@ -440,7 +448,7 @@ Every failure returns no ROM. `wizc` writes no output file on failure.
 ## Tests
 
 `ctest` runs `cwapplink` and `toolchain`. `build/cwapplink_tests` currently
-checks 68 cases:
+checks 69 cases:
 
 - slot keys 1..24, slot 25 and beyond without a key, ASCII-safe legends,
 - manifest comments, blank lines and relative paths,

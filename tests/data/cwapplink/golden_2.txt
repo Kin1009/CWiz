@@ -1,6 +1,6 @@
 # .cwapplink golden fixture: generated two-app project (slots 13,14)
 # base is the bundled fx-580VN X ROM (kFx580VnRom).
 base_sha256 fb775cb6b26b03010a7b14d3223e79a6245a26a49ba44f3b97d5423520de3b39
-output_sha256 2f130b4c0c360b89b8362e2319b45946fb95e474ab5165a55779bec17d8882f3
+output_sha256 7dc51b572dce313844ac83345009323a48358d2973de198c78f2dff66a32c272
 apps 2
 mode_count 13

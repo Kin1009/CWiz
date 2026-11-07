@@ -15,6 +15,12 @@ bool same_size(const cwmode::Image& a, const cwmode::Image& b) {
     return a.width == b.width && a.height == b.height;
 }
 
+void set_ink(cwmode::Image& image, int x, int y, bool ink) {
+    size_t i = ((size_t)y * image.width + x) * 4;
+    image.rgba[i + 0] = image.rgba[i + 1] = image.rgba[i + 2] = ink ? 0 : 255;
+    image.rgba[i + 3] = 255;
+}
+
 void set_px(cwmode::Image& image, int x, int y, uint8_t v) {
     if (x < 0 || y < 0 || x >= image.width || y >= image.height) return;
     size_t i = ((size_t)y * image.width + x) * 4;
@@ -22,19 +28,6 @@ void set_px(cwmode::Image& image, int x, int y, uint8_t v) {
     image.rgba[i + 1] = v;
     image.rgba[i + 2] = v;
     image.rgba[i + 3] = 255;
-}
-
-void set_ink(cwmode::Image& image, int x, int y, bool ink) {
-    set_px(image, x, y, ink ? 0 : 255);
-}
-
-bool source_ink(const cwmode::Image& src, int x, int y, int threshold) {
-    if (x < 0 || y < 0 || x >= src.width || y >= src.height) return false;
-    size_t i = ((size_t)y * src.width + x) * 4;
-    const int a = src.rgba[i + 3];
-    if (a < 128) return false;
-    const int lum = (299 * src.rgba[i + 0] + 587 * src.rgba[i + 1] + 114 * src.rgba[i + 2]) / 1000;
-    return lum < threshold;
 }
 
 std::vector<uint32_t> crc_table() {
@@ -124,86 +117,9 @@ bool is_880(int model) { return model == 880; }
 
 cwmode::Image prepare_icon(const cwmode::Image& source, int model, int threshold,
                            bool border) {
-    const IconStyle style = icon_style(model);
-    cwmode::Image out;
-    out.width = style.width;
-    out.height = style.height;
-    out.rgba.assign((size_t)out.width * out.height * 4, 255);
-    for (size_t i = 3; i < out.rgba.size(); i += 4) out.rgba[i] = 255;
-    if (source.empty()) return out;
-    if (threshold < 0) threshold = 0;
-    if (threshold > 255) threshold = 255;
-
-    const int cw = border ? style.width - 2 : style.width;
-    const int ch = border ? style.height - 1 : style.height;
-    const int sw = source.width;
-    const int sh = source.height;
-    cwmode::Image content;
-    content.width = cw;
-    content.height = ch;
-    content.rgba.assign((size_t)cw * ch * 4, 255);
-    for (size_t i = 3; i < content.rgba.size(); i += 4) content.rgba[i] = 255;
-    for (int y = 0; y < ch; y++)
-        for (int x = 0; x < cw; x++) set_ink(content, x, y, false);
-
-    if (sw >= cw && sh >= ch) {
-        // Larger artwork: centre-crop, no resampling.
-        const int ox = (sw - cw) / 2;
-        const int oy = (sh - ch) / 2;
-        for (int y = 0; y < ch; y++)
-            for (int x = 0; x < cw; x++)
-                set_ink(content, x, y, source_ink(source, x + ox, y + oy, threshold));
-    } else if (sw <= cw && sh <= ch) {
-        // Smaller artwork: centre without upscaling, pad with background.
-        const int ox = (cw - sw) / 2;
-        const int oy = (ch - sh) / 2;
-        for (int y = 0; y < sh; y++)
-            for (int x = 0; x < sw; x++)
-                set_ink(content, x + ox, y + oy, source_ink(source, x, y, threshold));
-    } else {
-        // Mixed size: scale down preserving aspect (nearest neighbour), then pad.
-        const double sx = (double)cw / sw;
-        const double sy = (double)ch / sh;
-        const double scale = std::min(sx, sy);
-        int dw = (int)(sw * scale);
-        int dh = (int)(sh * scale);
-        if (dw < 1) dw = 1;
-        if (dh < 1) dh = 1;
-        if (dw > cw) dw = cw;
-        if (dh > ch) dh = ch;
-        const int ox = (cw - dw) / 2;
-        const int oy = (ch - dh) / 2;
-        for (int y = 0; y < dh; y++)
-            for (int x = 0; x < dw; x++) {
-                const int sx0 = std::min(sw - 1, x * sw / dw);
-                const int sy0 = std::min(sh - 1, y * sh / dh);
-                set_ink(content, x + ox, y + oy, source_ink(source, sx0, sy0, threshold));
-            }
-    }
-
-    for (int y = 0; y < ch; y++)
-        for (int x = 0; x < cw; x++) {
-            const size_t i = ((size_t)y * cw + x) * 4;
-            const bool ink = content.rgba[i] == 0;
-            set_ink(out, x, y, ink);
-        }
-    if (border) {
-        // Stock cell separator: one pixel on the right and bottom edges.
-        for (int y = 1; y < style.height - 1; y++) set_ink(out, style.width - 2, y, true);
-        for (int x = 1; x < style.width - 2; x++) set_ink(out, x, style.height - 1, true);
-        // Shortcut-key box.  Measured from the stock 48x23 bitmaps (menu table
-        // at 0x7FF8): x 38..46, y 12..21, with the top-left pixel rounded off.
-        // The firmware draws the key digit in this white box in black, so the
-        // box itself is empty.  It is painted after the artwork.
-        const int bx0 = is_880(model) ? 54 : 38;
-        const int bx1 = is_880(model) ? 62 : 46;
-        const int by0 = is_880(model) ? 8 : 12;
-        const int by1 = is_880(model) ? 14 : 21;
-        for (int y = by0; y <= by1; y++)
-            for (int x = bx0; x <= bx1; x++) set_ink(out, x, y, true);
-        set_ink(out, bx0, by0, false);
-    }
-    return out;
+    return cwmode::prepare_mode_icon(source, model == 880 ? cwmode::Model::Cw880
+                                                         : cwmode::Model::Cw580,
+                                     threshold, border);
 }
 
 std::vector<uint8_t> pack_icon(const cwmode::Image& prepared, int model) {

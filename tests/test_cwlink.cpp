@@ -225,6 +225,36 @@ void check_three_arg_icons(TempDir& dir) {
             wt::check(wiz::fmt("three-arg: %d apps registered", n), (int)r.apps.size() == n);
     }
 
+    // The builder decorates the original PNG; passing an already decorated
+    // cwicon output must not paint or crop it a second time.
+    {
+        wiz::cwmode::Image raw_image;
+        std::string error;
+        if (wiz::cwmode::load_image(icon_path, raw_image, error)) {
+            const wiz::cwmode::Image decorated =
+                wiz::cwmode::prepare_mode_icon(raw_image, wiz::cwmode::Model::Cw580);
+            const std::string decorated_path = dir.path + "/decorated.png";
+            if (wiz::write_png(decorated_path, decorated, error)) {
+                write_file(dir.path + "/raw3.cwiz", tiny(13, "DECOR"));
+                write_file(dir.path + "/dec3.cwiz",
+                           wiz::fmt("#for 580\n#cwapp 13 \"DECOR\" %s\n"
+                                    "void main() { delay(1); }\n",
+                                    decorated_path.c_str()));
+                write_file(dir.path + "/raw3.cwapplink", "raw3.cwiz\n");
+                write_file(dir.path + "/dec3.cwapplink", "dec3.cwiz\n");
+                wiz::CwappLinkResult a = wiz::build_cwapplink(
+                    dir.path + "/raw3.cwapplink",
+                    {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize}, false);
+                wiz::CwappLinkResult b = wiz::build_cwapplink(
+                    dir.path + "/dec3.cwapplink",
+                    {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize}, false);
+                wt::check("three-arg: builder decoration is idempotent", a.ok && b.ok &&
+                                                                          a.rom == b.rom,
+                          a.ok && b.ok ? "" : a.error + b.error);
+            }
+        }
+    }
+
     // A three-argument source and a four-argument source with the inverse PNG
     // must produce byte-identical ROMs.
     write_file(dir.path + "/three.cwapplink", "three.cwiz\n");
