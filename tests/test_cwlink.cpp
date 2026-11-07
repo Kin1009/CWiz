@@ -15,6 +15,7 @@
 
 #include "builtin_rom.hpp"
 #include "cpre.hpp"
+#include "cwicon.hpp"
 #include "cwlink.hpp"
 #include "harness.hpp"
 #include "patch.hpp"
@@ -97,13 +98,15 @@ void check_keys() {
                   wiz::slot_key_legend(18) == "z s<>d" && wiz::slot_key_legend(19) == "M M+");
 }
 
-void check_two_apps() {
-    const std::string manifest = wt::root_path("examples/cwapplink/demo.cwapplink");
-    std::error_code ec;
-    if (!fs::is_regular_file(manifest, ec)) {
-        wt::check("cwapplink 2-app: example project exists", false, manifest);
-        return;
-    }
+void check_two_apps(TempDir& dir) {
+    // Use a generated project so the golden hash does not depend on editable
+    // example files; the repository demo is still built below.
+    const std::string manifest = dir.path + "/project.cwapplink";
+    write_file(dir.path + "/a.cwiz", extra_source(13, icon("icon_580_a.png").c_str(),
+                                                  icon("icon_580_b.png").c_str(), "APP A"));
+    write_file(dir.path + "/b.cwiz", extra_source(14, icon("icon_580_c.png").c_str(),
+                                                  icon("icon_580_d.png").c_str(), "APP B"));
+    write_file(manifest, "a.cwiz\nb.cwiz\n");
     const std::map<std::string, std::string> g = golden("golden_2.txt");
     wiz::CwappLinkResult r = wiz::build_cwapplink(manifest, base_rom(), false);
     wt::check("cwapplink 2-app: build succeeds", r.ok, r.error);
@@ -125,6 +128,12 @@ void check_two_apps() {
                   wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
         wt::check("cwapplink 2-app: golden base ROM", wt::sha256_hex(base_rom()) ==
                                                           g.at("base_sha256"));
+    }
+    const std::string demo = wt::root_path("examples/cwapplink/demo.cwapplink");
+    std::error_code ec;
+    if (fs::is_regular_file(demo, ec)) {
+        wiz::CwappLinkResult d = wiz::build_cwapplink(demo, base_rom(), false);
+        wt::check("cwapplink 2-app: repository demo builds", d.ok, d.error);
     }
 }
 
@@ -172,6 +181,63 @@ void check_thirteen_apps(TempDir& dir) {
         wt::check("cwapplink 13-app: golden byte hash",
                   wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
     }
+}
+
+void check_three_arg_icons(TempDir& dir) {
+    const std::string icon_path = icon("icon_580_a.png");
+    const std::string inv_path = dir.path + "/inverse.png";
+    {
+        wiz::cwmode::Image image, inverse;
+        std::string error;
+        if (!wiz::cwmode::load_image(icon_path, image, error)) {
+            wt::check("three-arg: load fixture", false, error);
+            return;
+        }
+        inverse = wiz::cwmode::invert_image(image);
+        if (!wiz::write_png(inv_path, inverse, error)) {
+            wt::check("three-arg: write inverse PNG", false, error);
+            return;
+        }
+    }
+    auto tiny = [](int slot, const std::string& text) {
+        return wiz::fmt("#for 580\n#cwapp %d \"%s\" ../../../tests/data/cwmode/icon_580_a.png\n"
+                        "void main() { delay(1); }\n",
+                        slot, text.c_str());
+    };
+    write_file(dir.path + "/three.cwiz", tiny(13, "THREE"));
+    write_file(dir.path + "/four.cwiz",
+               wiz::fmt("#for 580\n#cwapp 13 \"THREE\" %s %s\n"
+                        "void main() { delay(1); }\n",
+                        icon_path.c_str(), inv_path.c_str()));
+    for (int n : {1, 2, 6, 30}) {
+        std::string manifest;
+        for (int i = 0; i < n; i++) {
+            const int slot = 13 + i;
+            const std::string name = wiz::fmt("n%d_%d.cwiz", n, slot);
+            write_file(dir.path + "/" + name, tiny(slot, wiz::fmt("A%d", slot).c_str()));
+            manifest += name + "\n";
+        }
+        write_file(dir.path + "/many.cwapplink", manifest);
+        wiz::CwappLinkResult r = wiz::build_cwapplink(
+            dir.path + "/many.cwapplink", {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize}, false);
+        wt::check(wiz::fmt("three-arg: %d apps build", n), r.ok, r.error);
+        if (r.ok)
+            wt::check(wiz::fmt("three-arg: %d apps registered", n), (int)r.apps.size() == n);
+    }
+
+    // A three-argument source and a four-argument source with the inverse PNG
+    // must produce byte-identical ROMs.
+    write_file(dir.path + "/three.cwapplink", "three.cwiz\n");
+    write_file(dir.path + "/four.cwapplink", "four.cwiz\n");
+    wiz::CwappLinkResult a = wiz::build_cwapplink(
+        dir.path + "/three.cwapplink", {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize}, false);
+    wiz::CwappLinkResult b = wiz::build_cwapplink(
+        dir.path + "/four.cwapplink", {wiz::kFx580VnRom, wiz::kFx580VnRom + wiz::kFx580VnRomSize}, false);
+    wt::check("three-arg: implied inverse matches the explicit inverse image",
+              a.ok && b.ok && a.rom == b.rom,
+              a.ok && b.ok ? wiz::fmt("%s vs %s", wt::sha256_hex(a.rom).c_str(),
+                                       wt::sha256_hex(b.rom).c_str())
+                           : a.error + b.error);
 }
 
 void check_preprocessor(TempDir& dir) {
@@ -451,11 +517,12 @@ namespace wt {
 
 void run_cwlink() {
     check_keys();
-    check_two_apps();
     TempDir dir("run");
+    check_two_apps(dir);
     check_thirteen_apps(dir);
     check_preprocessor(dir);
     check_legacy(dir);
+    check_three_arg_icons(dir);
     check_errors(dir);
     check_cli(dir);
 }

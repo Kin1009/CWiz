@@ -5,9 +5,9 @@
 # .cwapplink builder and the extra #cwapp form changed these core files, so the
 # vendored copies must be byte-identical:
 #
-#   build.hpp build.cpp cpre.hpp cpre.cpp targets.cpp patch.hpp patch.cpp
-#   cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp asset_fallback.hpp
-#   data/runtime.asm data/template_*.asm third_party/stb_image.h
+#   build.hpp build.cpp cpre.hpp cpre.cpp cwiz.hpp cwiz.cpp wiz.hpp wiz.cpp
+#   targets.cpp patch.hpp patch.cpp cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp
+#   asset_fallback.hpp data/runtime.asm data/template_*.asm third_party/stb_image.h
 #
 # The stable snapshot is deliberately excluded.
 #
@@ -26,7 +26,7 @@ $root/emulator/CasioEmuMsvc/third_party/wiz/src
 $root/../CasioEmuMsvc-Mac/CasioEmuMsvc/third_party/wiz/src
 "
 
-files="build.hpp build.cpp cpre.hpp cpre.cpp targets.cpp patch.hpp patch.cpp cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp asset_fallback.hpp"
+files="build.hpp build.cpp cpre.hpp cpre.cpp cwiz.hpp cwiz.cpp wiz.hpp wiz.cpp targets.cpp patch.hpp patch.cpp cwlink.hpp cwlink.cpp cwmode.hpp cwmode.cpp asset_fallback.hpp"
 data_files="runtime.asm template_ML620906.asm template_ML620909.asm template_cwapp.asm template_fwnx.asm"
 status=0
 for dir in $targets; do

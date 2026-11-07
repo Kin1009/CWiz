@@ -49,6 +49,7 @@ add_library(wizcore STATIC
   src/lint.cpp
   src/cwmode.cpp
   src/cwlink.cpp
+  src/cwicon.cpp
 )
 target_include_directories(wizcore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
@@ -59,8 +60,9 @@ add_executable(customromrun src/main_customromrun.cpp)
 add_executable(patch_menu  src/main_patch_menu.cpp)
 add_executable(cwmode      src/main_cwmode.cpp)
 add_executable(wizlint     src/main_wizlint.cpp)
+add_executable(cwicon      src/main_cwicon.cpp)
 
-foreach(tool wizc wizrun customromrun patch_menu cwmode wizlint)
+foreach(tool wizc wizrun customromrun patch_menu cwmode wizlint cwicon)
   target_link_libraries(${tool} PRIVATE wizcore)
 endforeach()
 
@@ -73,6 +75,8 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_v03.cpp
   ${WIZ_TESTS_DIR}/test_v03b.cpp
   ${WIZ_TESTS_DIR}/test_cwapp.cpp
+  ${WIZ_TESTS_DIR}/test_cwicon.cpp
+  ${WIZ_TESTS_DIR}/test_preserve.cpp
   ${WIZ_TESTS_DIR}/test_cwiz.cpp
   ${WIZ_TESTS_DIR}/test_cpre.cpp
   ${WIZ_TESTS_DIR}/test_lint.cpp

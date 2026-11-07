@@ -1,6 +1,6 @@
 # .cwapplink: many cwapp apps in one fx-580VN X ROM
 
-Status: current (2026-11-06)
+Status: current (2026-11-07)
 
 A `.cwapplink` project compiles several cwapp sources into one 262144-byte
 fx-580VN X firmware image. Every app gets its own code block and its own mode
@@ -67,16 +67,21 @@ Rules:
 ```cwiz
 #for 580
 #cwapp 13 "My App" unselected.png selected.png
+#cwapp 13 "My App" unselected.png
 ```
 
 - The first argument is the app slot and shortcut position. It must be a
   positive integer.
 - The second argument is the mode text. Use quotes when it contains spaces.
-- The last two arguments are the unselected and selected 48x23 icons. Paths are
-  relative to the source file.
+- The icon arguments are one or two 48x23 images. Paths are relative to the
+  source file. With one icon, the selected variant is the exact inverse of the
+  unselected image: transparent pixels are flattened over white, the RGB
+  channels are inverted and the result is stored opaque. On the packed 1-bit
+  580 icon and the two-plane 880 icon the selected variant is the bitwise
+  complement of the packed bytes.
 - `#slot` must not be used with this form. The compiler reports
-  `#slot is not used with '#cwapp <slot> <text> <image> <selected>'` when both
-  appear.
+  `#slot is not used with '#cwapp <slot> <text> <image> [<selected>]'` when
+  both appear.
 
 ## Slots, shortcut keys and ordering
 
@@ -149,6 +154,68 @@ The builder therefore:
 The selected image is never dropped silently: a warning is part of the build
 result, and the documentation states the rule. If the artwork needs a selected
 variant, bake the highlight into the stored icon.
+
+## Icon conversion (`cwicon`)
+
+`cwicon` turns ordinary artwork into the stock app-menu icon style and prints
+the exact packed bytes the firmware stores. It uses a 48x23 one-bit canvas on
+the 580 and a 64x16 two-plane canvas on the 880, with the stock one-pixel
+separator on the right and bottom edges.
+
+```console
+$ build/cwicon --model 580 logo.png -o app_icon.png --raw app_icon.bin \
+      --preview-both app_icon_both.png
+$ build/wizc app.cwiz -o app.bin
+# #cwapp 13 "Logo" app_icon.png
+```
+
+The three-argument `#cwapp` form then derives the selected variant as the exact
+inverse. To supply a custom selected image instead, use the four-argument form.
+
+Rules:
+
+- Ink is a pixel whose luminance is below `--threshold` (default 128); alpha
+  below 128 is background. `--threshold 0` inks nothing; `--threshold 255`
+  leaves pure white as background.
+- Artwork at least the content size in both axes is centre-cropped. Artwork
+  smaller in both axes is centred without upscaling. Mixed sizes are scaled
+  down preserving aspect, then padded. `--no-border` uses the full canvas and
+  omits the separator.
+- `-o` is the unselected PNG at the exact icon size, directly usable in
+  `#cwapp`. `--raw` is `0x8A` bytes for the 580 or `0x100` bytes for the 880
+  (plane 0 then plane 1).
+- Without `--selected`, the selected variant is the inverse of the packed
+  unselected bytes. `--preview-both` writes a 4x side-by-side preview.
+
+## Preserving RAM across an app (`#preserve`)
+
+A cwapp owns the CPU, so values written by the firmware before the app starts
+survive only if the app protects them. Add repeatable `#preserve` lines after
+`#cwapp`:
+
+```cwiz
+#for 580
+#cwapp
+#slot 1
+#preserve 0xD114 1
+#preserve 0xE000 4
+```
+
+At `_APP` entry the runtime snapshots those byte ranges. MENU, `exit()` and a
+return from `main()` restore them byte for byte before the mode-menu return.
+
+- Ranges are inside cwapp RAM `0xD000..0xFFFF`, have a positive length, do not
+  overflow, and do not overlap the cwapp save area `0xE5D3..0xE7FF`.
+  Overlapping ranges and more than 8 ranges are rejected with a diagnostic.
+- The snapshot buffer is a hidden symbol allocated through the compiler's RAM
+  allocator, never a hardcoded free address.
+- The fixed capacity is 8 ranges and 128 snapshot bytes. The directive is
+  checked at compile time. The runtime `preserve(addr, len)` call registers a
+  later range and returns 1 on success, 0 for an invalid range or a full table;
+  it snapshots immediately. `restore_preserved()` restores every registered
+  range immediately, which is useful after a function mutates the state.
+- The state block is 162 bytes: count, used bytes, 8 four-byte descriptors and
+  the 128-byte snapshot area.
 
 ## fx-880BTG
 
@@ -355,7 +422,7 @@ Every failure returns no ROM. `wizc` writes no output file on failure.
 ## Tests
 
 `ctest` runs `cwapplink` and `toolchain`. `build/cwapplink_tests` currently
-checks 58 cases:
+checks 68 cases:
 
 - slot keys 1..24, slot 25 and beyond without a key, ASCII-safe legends,
 - manifest comments, blank lines and relative paths,
@@ -368,6 +435,12 @@ checks 58 cases:
   boot dispatcher that relaunches the running app and keeps mode 0D on the menu
   path,
 - mixed legacy plus extra project,
+- the three-argument `#cwapp` form for 1, 2, 6 and 30 apps, and byte equality
+  against a four-argument source with the inverse PNG,
+- `cwicon` crop/pad/aspect rules, threshold edges, inverse packing, stock
+  round-trip and 580/880 packed lengths,
+- `#preserve` single and multiple ranges, mid-run restore, dynamic
+  registration, invalid/overlapping ranges and capacity limits,
 - MENU, `exit()` and returning from `main()` call the firmware menu routine at
   `2:AD4C`; AC is returned to the app; Shift+AC reaches the stock STOP path,
 - duplicate slot, stock-key conflict, keyed gap, non-cwapp source, missing

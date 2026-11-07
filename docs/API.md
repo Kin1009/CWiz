@@ -60,6 +60,8 @@ languages. You cannot define a function with one of these names. Unless noted, a
 | `buffered(on)` | 1 | — | Compatibility no-op. Drawing always targets SB2. |
 | `flip()` | 0 | — | Alias for `render()` (kept for older programs). |
 | `exit()` | 0 | — | **cwapp only.** Leave the program through the saved firmware stack and open the firmware mode menu. This is the same clean return as MENU: no reset and no splash. |
+| `preserve(addr, len)` | 2 | 1/0 | **cwapp only.** Register a RAM range and snapshot it immediately. Returns 1 on success, 0 for an invalid range or a full table (8 ranges, 128 bytes). |
+| `restore_preserved()` | 0 | — | **cwapp only.** Restore every registered range byte for byte immediately. MENU, `exit()` and `main()` return do this automatically. |
 | `_hspan(x0, x1, y, c)` | 4 | — | Internal fast span fill, `x0..x1-1`. Requires `0 <= x0 < x1 <= 192`, `0 <= y < ROWS`. |
 | `ticks()` | 0 | timer count | Free-running Timer0 counter, **8 counts per millisecond**. The timer is started on the first call. |
 | `delay_ms(ms)` | 1 | — | Wait `ms` milliseconds using that timer (calibrated, unlike `delay`). Negative values return immediately. |
@@ -235,6 +237,16 @@ Example: `if key_hit(K_OK): …`
 `K_EXP`=13 `K_ANS`=14 `K_EXE`=15
 
 `K_NONE` is `-1` on both.
+
+### cwapp: preserving RAM with `#preserve`
+
+In a `.cwiz` source, repeatable `#preserve <addr> <len>` lines after `#cwapp`
+snapshot RAM ranges at `_APP` entry and restore them before the clean menu
+return. Addresses use hex or decimal. Ranges must lie in `0xD000..0xFFFF`, must
+not overflow, and must not overlap the cwapp save area `0xE5D3..0xE7FF`.
+Capacity is 8 ranges and 128 snapshot bytes; the compiler rejects an overflow.
+For ranges discovered at run time use `preserve(addr, len)`, and call
+`restore_preserved()` after a function mutates them.
 
 ### cwapp keys: MENU, AC, ON and OFF
 

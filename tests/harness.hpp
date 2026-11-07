@@ -199,6 +199,8 @@ void run_cw();
 void run_cwiz();
 void run_cpre();
 void run_cwapp();
+void run_cwicon();
+void run_preserve();
 void run_lint();
 void run_fuzz();
 void run_conformance();

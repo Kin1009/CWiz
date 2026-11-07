@@ -48,6 +48,8 @@ int main(int argc, char** argv) {
     run_guarded("test_v03", wt::run_v03);
     run_guarded("test_v03b", wt::run_v03b);
     run_guarded("test_cwapp", wt::run_cwapp);
+    run_guarded("test_cwicon", wt::run_cwicon);
+    run_guarded("test_preserve", wt::run_preserve);
     run_guarded("test_cwiz", wt::run_cwiz);
     run_guarded("test_cpre", wt::run_cpre);
     run_guarded("test_lint", wt::run_lint);
