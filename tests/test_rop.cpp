@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -983,6 +985,38 @@ void wt::run_rop() {
             }
             check("rop: RAC and direct payloads differ only in the chain class bytes",
                   classes_only);
+
+            // The same invariant for the committed CWiz ROP examples.
+            const char* examples[] = {
+                "examples/rop/01_hello.cwiz",
+                "examples/rop/02_line.cwiz",
+                "examples/rop/03_common.cwiz",
+            };
+            for (const char* rel : examples) {
+                std::ifstream in(wt::root_path(rel), std::ios::binary);
+                if (!in) {
+                    std::printf("NOTE rop: %s not found; skipping the example comparison\n", rel);
+                    continue;
+                }
+                std::stringstream buffer;
+                buffer << in.rdbuf();
+                const std::string rsc =
+                    (std::filesystem::current_path() / "rop-example.rsc").string();
+                const wiz::RacRopResult ex =
+                    wiz::build_rop_rac(buffer.str(), "580", "cwiz", rsc, rac, false);
+                bool same_shape = ex.ok && ex.payload.size() == ex.direct.bytes.size();
+                bool same_pool = same_shape;
+                for (size_t i = 0; same_shape && i < ex.payload.size(); ++i) {
+                    if (ex.payload[i] == ex.direct.bytes[i]) continue;
+                    const bool class_byte = (i % 4 == 2) || (i % 4 == 3);
+                    const int delta = (int)ex.direct.bytes[i] - (int)ex.payload[i];
+                    if (!class_byte || delta != 0x30) same_pool = false;
+                }
+                check(std::string("rop: RAC matches the direct example ") + rel,
+                      same_pool, ex.error);
+                std::error_code ec2;
+                std::filesystem::remove(rsc, ec2);
+            }
             std::error_code ec;
             std::filesystem::remove(rsc_path, ec);
         }
