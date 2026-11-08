@@ -246,6 +246,81 @@ launcher separately as `<name>.launcher.bin`. "Build & Run" also injects both
 blocks into the running model. Use **Copy launcher** in the toolbar to put the
 launcher hex on the clipboard.
 
+## RAC backend (optional, external)
+
+RAC-Compiler is a separate GPL-3.0 project
+([luongvantam/RAC-Compiler](https://github.com/luongvantam/RAC-Compiler)). It is
+an **optional external backend**: `wizc` only runs `rac.py` as a separate
+process and never links or copies its code into the Wiz compiler. The direct
+backend above is complete and needs neither Python nor RAC.
+
+```sh
+tools/fetch_rac.sh                 # clone into tools/rac-compiler (gitignored)
+wizc --emit-rsc hello.cwiz         # write hello.rsc, a RAC source
+wizc --backend rac hello.cwiz      # compile through RAC and use its bytes
+wizc --backend rac --rac-launcher hello.cwiz
+wizc --backend rac --rac /path/to/rac.py hello.cwiz   # or $RAC_COMPILER
+```
+
+* `--emit-rsc` writes `<name>.rsc` instead of a `.bin`. The file uses real RAC
+  syntax: `@section.main at 0xd730 backup 0xe9e0`, `lbl`, `call <address>`,
+  `hex`, `"..."` string literals and `eval(adr(label)+dist.main)` pointers. Any
+  byte that has no safe RAC spelling stays in a `hex` block, so the output
+  always compiles.
+* `--backend rac` emits the `.rsc`, runs `python3 rac.py <model> <file>`
+  (`580vnx` or `880btg`), parses the section report and writes the RAC payload
+  at its backup address (`E9E0` on the 580) and the launcher at `D180`/`9268`.
+* On any RAC failure — missing clone, no Python, a compiler error or an empty
+  section — `wizc` prints a warning and falls back to the direct backend. It
+  never leaves a partially correct image behind.
+* `--rac-launcher` uses the launcher that RAC compiles from
+  `@section.launcher` instead of the compiler's launcher chung. The substitution
+  is stated in the output. It is 580-only; on the 880 the compiler launcher is
+  kept (and a warning says so).
+
+### Byte differences between the two backends
+
+`--backend rac` uses the RAC payload as-is. For the same source it is the same
+length as the direct payload and the string pool and key tables are identical,
+but the two encodings of a *gadget call word* differ:
+
+| word | direct backend | RAC `call 17b34` |
+|---|---|---|
+| `pop xr0` | `34 7B 31 30` | `34 7B 01 00` |
+| `printline` | `C8 3D 32 30` | `C8 3D 02 00` |
+| setlr (`09FA8`) | `A8 9F 30 30` | `A8 9F 00 00` |
+
+The first two bytes are the low 16 bits of the address in both cases. The
+direct emitter stores the input-area token class in bytes 3–4 (`0x30 | segment`
+and `0x30`); RAC's `call` stores the plain 32-bit address (`segment` and `00`).
+Both mask to the same 20-bit code address, so the chain is equivalent. Branch
+targets (2 bytes, `label - 2`), key tables and string pointers are byte-for-byte
+identical. `wizc` reports the number of differing bytes as a warning rather
+than hiding it.
+
+The launchers also differ by design:
+
+* compiler default (580): the 26-byte *launcher chung* above.
+* RAC launcher (`--rac-launcher`, 580): 32 bytes —
+  `FD 24 30 30`, `setlr_pc`, `pop xr0` (`main`, `backup`), `call 09451`,
+  `FE <length code>`, `pop er14` (`main - 2`), `sp = er14, pop er14`.
+
+## Running from the emulator
+
+"Build & Run" in the debugger uses the RAC backend when it can find
+`rac.py` (`$RAC_COMPILER`, then `tools/rac-compiler/rac.py`) and otherwise the
+direct backend. It writes `<name>.bin`, `<name>.asm` and (with RAC)
+`<name>.rsc`, pauses the model, writes the payload and the launcher, and
+resumes.
+
+A launcher placed in the program input area (`D180` on the 580, `9268` on the
+880) is **firmware data, not CPU code**: the calculator starts it with its
+program/expression interpreter when you press **EXE**. Setting PC to that
+address would execute the ROM at the same address instead, so the debugger does
+not do that; it verifies both blocks and tells you to press EXE. Launchers
+placed outside the input area are transferred to with PC (word address =
+`base / 2`).
+
 The `.asm` listing is written in the community ROP source style, so it can be
 read next to the hand written examples:
 

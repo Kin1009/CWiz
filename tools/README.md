@@ -25,6 +25,20 @@ are flagged in the header of `compiler/template_ML620906.asm`:
 | `KIMASK` | `0F042H` | `libcw.h KeyboardInMask = 0xF042` (the DCL calls it `KIMOD`); the 909 boot writes `0` there. |
 | `KOMASK` | `0F044H` | `libcw.h KeyboardOutMask = 0xF044` (the DCL calls it `KOCON`); the 909 boot writes `80H,0FFH` there. |
 
+## `fetch_rac.sh`
+
+Clones the optional **RAC-Compiler** backend into `tools/rac-compiler/` (gitignored):
+
+```sh
+tools/fetch_rac.sh            # first checkout
+tools/fetch_rac.sh --update   # pull the latest revision
+```
+
+RAC-Compiler is GPL-3.0 and is *not* part of the Wiz compiler: `wizc --backend rac`
+and `wizc --emit-rsc` only invoke `rac.py` as a separate process. The direct ROP
+backend works without Python or RAC. Point `wizc` elsewhere with `$RAC_COMPILER`
+or `--rac PATH`; see [../docs/ROP.md](../docs/ROP.md).
+
 ## What happened to the old scripts
 
 * **`gen_template906.py`** — translated `originals/ML620Q906.asm` into

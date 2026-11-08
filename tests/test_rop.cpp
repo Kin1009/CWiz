@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -917,4 +918,73 @@ void wt::run_rop() {
               r_keys.log.find("KEY_UP") != std::string::npos &&
               r_keys.log.find("adr(up) - 2") != std::string::npos,
           r_keys.log);
+
+    // ---------------------------------------------------------------- RAC source
+    // --emit-rsc writes a real RAC source: sections, labels, calls, string
+    // literals and eval(adr(...)) references, with hex for raw data.
+    {
+        std::string err;
+        const std::string rsc = wiz::rop_to_rsc(rac_equivalent, false, err);
+        check("rop: --emit-rsc emits a RAC main section",
+              err.empty() && rsc.find("@section.main at 0xd730 backup 0xe9e0") !=
+                                std::string::npos,
+              err);
+        check("rop: --emit-rsc uses lbl, call and hex syntax",
+              rsc.find("lbl main") != std::string::npos &&
+                  rsc.find("call 09fa8") != std::string::npos &&
+                  rsc.find("call 23dc8") != std::string::npos &&
+                  rsc.find("hex 01 30") != std::string::npos,
+              rsc);
+        check("rop: --emit-rsc uses string literals and eval(adr()) pointers",
+              rsc.find("\"HELLO~ROP\"") != std::string::npos &&
+                  rsc.find("eval(adr(str_1)+dist.main)") != std::string::npos,
+              rsc);
+        check("rop: --emit-rsc writes the compiler launcher section",
+              rsc.find("@section.launcher at 0xd180") != std::string::npos &&
+                  rsc.find("fd 24 30 30") != std::string::npos,
+              rsc);
+        std::string err2;
+        const std::string rsc_launcher = wiz::rop_to_rsc(rac_equivalent, true, err2);
+        check("rop: --rac-launcher emits the RAC launcher section",
+              err2.empty() && rsc_launcher.find("pr_org(main), pr_backup(main)") !=
+                                  std::string::npos &&
+                  rsc_launcher.find("call 09451") != std::string::npos &&
+                  rsc_launcher.find("er14 = eval(pr_org(main) - 2)") != std::string::npos,
+              err2);
+    }
+
+    // Optional external backend: the emitted .rsc must be accepted by RAC.
+    {
+        const std::string rac = wiz::default_rac_path();
+        if (!wiz::rac_available(rac)) {
+            std::printf("NOTE rop: RAC compiler not found at %s; skipping the .rsc "
+                        "acceptance test (tools/fetch_rac.sh)\n",
+                        rac.c_str());
+        } else {
+            const std::string rsc_path =
+                (std::filesystem::current_path() / "rop-emit-rsc-test.rsc").string();
+            const wiz::RacRopResult rr =
+                wiz::build_rop_rac(hello_source(), "580", "cwiz", rsc_path, rac, false);
+            check("rop: the RAC compiler accepts --emit-rsc output", rr.ok && rr.ran, rr.error);
+            check("rop: the RAC payload is injected at the backup address",
+                  rr.ok && rr.payload_base == 0xE9E0);
+            check("rop: the RAC payload keeps the direct payload length",
+                  rr.ok && rr.payload.size() == rr.direct.bytes.size());
+            // The RAC `call` form writes the plain 32-bit address
+            // ([lo, hi, segment, 00]); the direct chain word carries the input
+            // token class bytes ([lo, hi, 0x30|segment, 0x30]).  Both mask to
+            // the same 20-bit address, so only the two class bytes may differ.
+            bool classes_only = rr.ok;
+            for (size_t i = 0; rr.ok && i < rr.payload.size(); ++i) {
+                if (rr.payload[i] == rr.direct.bytes[i]) continue;
+                const bool class_byte = (i % 4 == 2) || (i % 4 == 3);
+                const int delta = (int)rr.direct.bytes[i] - (int)rr.payload[i];
+                if (!class_byte || (delta != 0x30 && delta != 0x00)) classes_only = false;
+            }
+            check("rop: RAC and direct payloads differ only in the chain class bytes",
+                  classes_only);
+            std::error_code ec;
+            std::filesystem::remove(rsc_path, ec);
+        }
+    }
 }

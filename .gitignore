@@ -52,3 +52,6 @@ plan.md
 /check-updates
 /verify.py
 /docs/getkey_*.txt
+
+# ------------------------------------------------------------------ optional RAC backend (GPL-3.0, fetched by tools/fetch_rac.sh)
+/tools/rac-compiler/

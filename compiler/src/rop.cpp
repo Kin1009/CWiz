@@ -33,6 +33,7 @@
 
 #include "rop.hpp"
 #include "asm.hpp"
+#include "build.hpp"
 #include "directives.hpp"
 #include "rop_data.hpp"
 #include "vn_f4.hpp"
@@ -888,6 +889,10 @@ struct Emitter {
         row.kind = kind;
         row.name = (kind == GKind::Pop) ? pop_register(found) : found;
         rows.push_back(row);
+        // RAC's `call <hex>` produces exactly the same four-byte chain word
+        // (address, 0x30 | segment, 0x30) when the gadget address is spelled
+        // out, so the emitted .rsc stays byte-identical.
+        rsc_item(RopRscItem::Kind::Call, row.offset, hex5(addr));
     }
     uint32_t eval(const ExprP& e, std::string& err) {
         switch (e->k) {
@@ -2501,7 +2506,7 @@ std::string rop_to_rsc(const RopResult& rop, bool rac_launcher, std::string& err
 
     // Annotated items by offset.
     std::map<size_t, std::vector<std::string>> labels;
-    std::map<size_t, std::string> words, literals;
+    std::map<size_t, std::string> words, literals, calls;
     std::map<size_t, size_t> literal_len;
     for (const auto& item : rop.rsc) {
         switch (item.kind) {
@@ -2509,6 +2514,7 @@ std::string rop_to_rsc(const RopResult& rop, bool rac_launcher, std::string& err
                 labels[item.offset].push_back(lowercase_ascii(item.text));
                 break;
             case RopRscItem::Kind::Word: words[item.offset] = item.text; break;
+            case RopRscItem::Kind::Call: calls[item.offset] = item.text; break;
             case RopRscItem::Kind::Literal:
                 literals[item.offset] = item.text;
                 literal_len[item.offset] = item.length;
@@ -2539,6 +2545,12 @@ std::string rop_to_rsc(const RopResult& rop, bool rac_launcher, std::string& err
             i += 2;
             continue;
         }
+        auto ci = calls.find(i);
+        if (ci != calls.end()) {
+            s << "    call " << lowercase_ascii(ci->second) << "\n";
+            i += 4;
+            continue;
+        }
         auto li = literals.find(i);
         if (li != literals.end()) {
             s << "    \"" << rsc_literal_text(li->second) << "\"\n";
@@ -2550,6 +2562,8 @@ std::string rop_to_rsc(const RopResult& rop, bool rac_launcher, std::string& err
         size_t end = std::min(i + 8, bytes.size());
         auto nw = words.lower_bound(i + 1);
         if (nw != words.end()) end = std::min(end, nw->first);
+        auto nc = calls.lower_bound(i + 1);
+        if (nc != calls.end()) end = std::min(end, nc->first);
         auto nl = literals.lower_bound(i + 1);
         if (nl != literals.end()) end = std::min(end, nl->first);
         auto lb = labels.upper_bound(i);
@@ -2591,6 +2605,27 @@ std::string rop_to_rsc(const RopResult& rop, bool rac_launcher, std::string& err
 
 std::string default_rac_path() {
     if (const char* env = std::getenv("RAC_COMPILER"); env && *env) return env;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> candidates;
+    candidates.push_back("tools/rac-compiler/rac.py");
+    fs::path cwd = fs::current_path(ec);
+    if (!ec) {
+        candidates.push_back(cwd / "tools" / "rac-compiler" / "rac.py");
+        candidates.push_back(cwd / ".." / "tools" / "rac-compiler" / "rac.py");
+        candidates.push_back(cwd / ".." / ".." / "tools" / "rac-compiler" / "rac.py");
+    }
+    if (!data_dir().empty()) {
+        const fs::path data = fs::path(data_dir());
+        // compiler/ and CasioEmuMsvc/third_party/wiz/data are both a few
+        // levels below the repository root.
+        candidates.push_back(data / ".." / "tools" / "rac-compiler" / "rac.py");
+        candidates.push_back(data / ".." / ".." / ".." / "tools" / "rac-compiler" / "rac.py");
+        candidates.push_back(data / ".." / ".." / ".." / ".." / "tools" / "rac-compiler" / "rac.py");
+    }
+    for (const auto& candidate : candidates) {
+        if (fs::is_regular_file(candidate, ec)) return candidate.string();
+    }
     return "tools/rac-compiler/rac.py";
 }
 
@@ -2756,7 +2791,7 @@ RacRopResult build_rop_rac(const std::string& source, const std::string& model,
     const RacSection* launcher = nullptr;
     for (const auto& section : sections) {
         const std::string name = lowercase_ascii(section.name);
-        if (name == "main" && !main) main = &section;
+        if ((name == "main" || name.empty()) && !main) main = &section;
         if (name == "launcher" && !launcher) launcher = &section;
     }
     if (!main || main->bytes.empty()) {
