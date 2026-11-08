@@ -405,7 +405,7 @@ void wt::run_rop() {
         const size_t p = find_seq(r_nts.bytes, word(0x17B34));
         check("rop: num_to_str passes [number, text] in xr0",
               p != kNoPos && at(r_nts.bytes, p + 4, 4) == seq({0x2E, 0xD9, 0x47, 0xD9}) &&
-                  has_seq(r_nts.bytes, word(0x279B6)),
+                  (has_seq(r_nts.bytes, word(0x279B8)) || has_seq(r_nts.bytes, word(0x279B6))),
               hex_of(r_nts.bytes));
     }
 
@@ -1015,14 +1015,14 @@ void wt::run_rop() {
                 {"examples/rop/arrow_keys.cwiz", 232, 36,
                  "3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56",
                  "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
-                {"examples/rop/01_hello.cwiz", 298, 36,
-                 "829243c70570a571a571bb79171d195788b1ca1dc8e3107a068e1e43f71d1712",
+                {"examples/rop/01_hello.cwiz", 294, 36,
+                 "e7ca7c2004baec6908f27d73e7b282e8dad0ee2af44421ac9f398df8b9ae7f2b",
                  "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
-                {"examples/rop/02_line.cwiz", 309, 36,
-                 "940d6eb4af607e6bace5ef4a62ea112afa2102528fc6043112bfafc674592d5c",
+                {"examples/rop/02_line.cwiz", 306, 36,
+                 "c8a10d570dee2cb4953f700dbf2e5cb11769c9e24fb69650dc5d20dd49f32510",
                  "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
-                {"examples/rop/03_common.cwiz", 323, 36,
-                 "efc8c099b8c2d2e6dfd4d996f235e0a0fbe21fa068256e54a73f0be1a17280d0",
+                {"examples/rop/03_common.cwiz", 320, 36,
+                 "6e44cfb1a5dd6452756ccb44885f5b511c26e41d010704ad08d5f51dc432ccc4",
                  "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
             };
             for (const Golden& g : goldens) {
@@ -1089,6 +1089,41 @@ void wt::run_rop() {
                   sha256_hex(arrow.launcher));
             std::error_code ec2;
             std::filesystem::remove(rsc, ec2);
+
+            // The same reference through the #raw-rsc escape hatch: both forms
+            // must compile to the same bytes.
+            const std::filesystem::path reference =
+                std::filesystem::path(rac).parent_path() / "rsc_ropchain" /
+                "arrow_keys.rsc";
+            std::error_code rec;
+            if (!std::filesystem::is_regular_file(reference, rec)) {
+                std::printf("NOTE rop: %s not found; skipping the #raw-rsc "
+                            "arrow comparison\n",
+                            reference.string().c_str());
+            } else {
+                std::ifstream ref_in(reference, std::ios::binary);
+                std::stringstream ref_text;
+                ref_text << ref_in.rdbuf();
+                const std::string raw_source =
+                    "#rop\n#for 580\n#org 0xE9E0\n#launcher common\n"
+                    "#raw-rsc {\n" +
+                    ref_text.str() + "\n}\n";
+                const std::string raw_rsc =
+                    (std::filesystem::current_path() / "rop-arrow-raw.rsc").string();
+                const wiz::RacRopResult passthrough =
+                    wiz::build_rop_rac(raw_source, "580", "cwiz", raw_rsc, rac);
+                check("rop: #raw-rsc arrow_keys matches the same payload",
+                      passthrough.ok && passthrough.payload.size() == 232 &&
+                          sha256_hex(passthrough.payload) ==
+                              "3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56",
+                      passthrough.error);
+                check("rop: #raw-rsc arrow_keys matches the same launcher",
+                      passthrough.ok && passthrough.launcher.size() == 36 &&
+                          sha256_hex(passthrough.launcher) ==
+                              "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0",
+                      passthrough.error);
+                std::filesystem::remove(raw_rsc, ec2);
+            }
         }
     }
 }

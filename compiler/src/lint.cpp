@@ -638,10 +638,12 @@ std::vector<LintDiagnostic> lint_source(const std::string& source,
     try {
         if (source_is_rop(source)) {
             const std::string rop_model = target == "880" || target == "cwii" ? "880" : "580";
-            const RopResult result = build_rop(source, rop_model, cwiz ? "cwiz" : "wiz");
-            if (!result.ok) {
+            std::string rsc_error;
+            const std::string rsc =
+                rop_source_to_rsc(source, rop_model, cwiz ? "cwiz" : "wiz", rsc_error);
+            if (rsc.empty()) {
                 add(out, LintSeverity::Error, 0, 0, 0, "compile",
-                    result.error.empty() ? "ROP compilation failed" : result.error);
+                    rsc_error.empty() ? "ROP compilation failed" : rsc_error);
             }
         } else if (target == "cwapp" || target == "580" || target == "880" || target == "cw" ||
                    target == "cwii" || target == "fwnx") {

@@ -286,44 +286,54 @@ source, destination and jump target itself.
 
 ### Emitting RAC source
 
-`--emit-rsc` writes the source that RAC compiles. For ordinary CWiz code the
-emitter uses RAC idioms: `@section.main at … backup …`, `lbl`, `setlr`,
-`setsfr`, `buffer_clear`, `line_print`, `render.ddd4`, `xr0 = … , adr(text)`,
-`call <address>`, string literals, key tables as word/label pairs and
-`eval(adr(label) - 2)` branch targets.
+`--emit-rsc` writes the source that RAC compiles. The high-level emitter
+reproduces the community layout directly:
 
-Some programs are already byte-verified as hand-written RAC. A `.cwiz` source
-may pass a complete RAC document through unchanged:
+* `lbl start`, `setlr_pc`, `setsfr`;
+* the read block: `er0 = adr(key)`, `getscancode`, `setlr_pc`;
+* the dispatch: `ea = adr(table)`, `pop er0`, the inline `lbl key / hex 00 00`
+  slot, `call 09C20`, `call 1C64A`, `sp = er6, pop er8`;
+* handlers: `xr0 = hex 01 01, adr(text)`, `line_print`, `render.ddd4`,
+  `er14 = eval(adr(restore) - 0x2)`, `sp = er14, pop er14`;
+* one shared `lbl restore`: `di, rt`,
+  `xr0 = pr_org(main), pr_backup(main)`, `call 09451`, `hex fe 0N`,
+  `er14 = eval(adr(read_input) - 0x2)`, `sp = er14, pop er14`;
+* the string pool after `restore`, each literal padded to an even length with
+  NUL bytes (`"UP"` + `hex 00 00`, `"RIGHT"` + `hex 00`);
+* key tables as `key_up` / `eval(adr(label) - 0x2)` pairs, with a
+  `hex 00 00` default and the `restore` target;
+* a final `lbl end` plus `hex 00 00 00 00` (the `#pad` size).
+
+`examples/rop/arrow_keys.cwiz` is written in that high-level form. It compiles
+to the hardware-verified 232-byte payload at `E9E0` (`d0 08 03 00 e0 a0 00 00
+…`) and the 36-byte launcher at `D180`:
 
 ```c
 #rop
 #for 580
 #org 0xE9E0
 #launcher common
+#pad 4
 
-#raw-rsc {
-@section.main at 0xd730 backup 0xe9e0
-lbl start
-    setlr_pc
-    setsfr
-...
-@section.launcher at 0xd180
-hex fd 24 30 30
-setlr
-...
+int k;
+
+void start() {
+    setlr_pc();
+    setsfr();
+read_input:
+    k = getscankey();
+    keytable(0x0480, up, 0x0840, down, 0x0440, left, 0x0880, right,
+             0x1004, exit, 0x0000, restore);
+up:
+    print(0x01, 0x01, "UP");
+    render();
+    goto restore;
+/* down / left / right are the same three statements */
+exit:
+    brk();
+restore:
+    restore();
 }
-```
-
-The compiler validates `#org` (the `@section.main` backup address) and the
-`#launcher` address, then hands the text to RAC verbatim. This is how
-`examples/rop/arrow_keys.cwiz` is kept identical to the hardware-verified
-program: 232 payload bytes at `E9E0` (`d0 08 03 00 e0 a0 00 00 …`) and the
-36-byte launcher at `D180`:
-
-```
-fd 24 30 30 a8 9f 30 30 e0 a0 30 30 34 7b 31 30
-30 d7 e0 e9 51 94 30 30 fe 01 42 07 31 30 2e d7
-60 0d 32 30
 ```
 
 `wiztests` pins both blocks by SHA-256:
@@ -332,6 +342,12 @@ fd 24 30 30 a8 9f 30 30 e0 a0 30 30 34 7b 31 30
 |---|---|---|
 | payload | 232 | `3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56` |
 | launcher | 36 | `d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0` |
+
+`#raw-rsc { ... }` remains as an escape hatch for a construct the emitter
+cannot express. Its text is handed to RAC verbatim after validating `#org`
+(the `@section.main` backup address) and the `#launcher` address. The tests
+compile both the high-level example and a `#raw-rsc` passthrough of the
+reference source and compare them with the same fixture.
 
 ## Running from the emulator
 
