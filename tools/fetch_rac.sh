@@ -1,11 +1,10 @@
 #!/bin/sh
-# fetch_rac.sh - fetch the optional RAC-Compiler backend.
+# fetch_rac.sh - fetch the RAC-Compiler backend required by #rop sources.
 #
-# RAC-Compiler is an external, optional backend for `wizc --backend rac` and
-# `wizc --emit-rsc`.  It is licensed under GPL-3.0 and is NOT linked into the
-# Wiz compiler binary; wizc only invokes `rac.py` as a separate process, in the
-# same way it would invoke any other command-line tool.  The direct (native)
-# ROP backend stays fully functional without Python or RAC.
+# RAC-Compiler is an external GPL-3.0 program.  It is NOT linked into the Wiz
+# compiler binary; wizc only invokes `rac.py` as a separate process.  #rop
+# sources cannot be compiled without it, but ordinary Wiz/CWiz programs (and the
+# rest of the toolchain) work without Python or RAC.
 #
 # The clone lives in tools/rac-compiler/ (gitignored).  Point wizc at another
 # checkout with $RAC_COMPILER or --rac PATH.
@@ -44,9 +43,10 @@ cat <<EOF
 
 RAC-Compiler is ready: $dest/rac.py
 
-  wizc --backend rac --rac "$dest/rac.py" examples/rop/01_hello.cwiz
+  wizc examples/rop/01_hello.cwiz
   wizc --emit-rsc examples/rop/01_hello.cwiz -o hello.rsc
   (cd "$dest" && python3 rac.py 580vnx /absolute/path/hello.rsc)
 
-The backend needs Python 3.  Set RAC_COMPILER to skip --rac.
+The ROP pipeline needs Python 3.  Set RAC_COMPILER to skip --rac, or point
+wizc --rac at another checkout.
 EOF

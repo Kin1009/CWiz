@@ -647,9 +647,11 @@ void wt::run_conformance() {
                     if (text.find("#cwapp") != std::string::npos ||
                         text.find("for cwapp") != std::string::npos) target = "cwapp";
                     if (text.find("#rop") != std::string::npos) {
-                        wiz::RopResult r = wiz::build_rop(text, target == "880" ? "880" : "580",
-                                                          ext == ".cwiz" ? "cwiz" : "wiz");
-                        ok = r.ok;
+                        std::string rsc_error;
+                        ok = !wiz::rop_source_to_rsc(
+                                  text, target == "880" ? "880" : "580",
+                                  ext == ".cwiz" ? "cwiz" : "wiz", rsc_error)
+                                  .empty();
                     } else if (ext == ".cwiz") {
                         wiz::build_cwiz(text, target, p);
                         ok = true;

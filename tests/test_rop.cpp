@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -64,6 +65,57 @@ std::string hex_of(const std::vector<uint8_t>& bytes) {
     return s;
 }
 
+// Minimal SHA-256, used to pin the RAC-compiled ROP outputs.
+std::string sha256_hex(const std::vector<uint8_t>& data) {
+    static const uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+        0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+        0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::vector<uint8_t> msg = data;
+    const uint64_t bits = (uint64_t)data.size() * 8;
+    msg.push_back(0x80);
+    while (msg.size() % 64 != 56) msg.push_back(0);
+    for (int i = 7; i >= 0; --i) msg.push_back((uint8_t)(bits >> (i * 8)));
+    auto rotr = [](uint32_t x, int n) { return (x >> n) | (x << (32 - n)); };
+    for (size_t off = 0; off < msg.size(); off += 64) {
+        uint32_t w[64];
+        for (int i = 0; i < 16; ++i)
+            w[i] = ((uint32_t)msg[off + i * 4] << 24) |
+                   ((uint32_t)msg[off + i * 4 + 1] << 16) |
+                   ((uint32_t)msg[off + i * 4 + 2] << 8) | (uint32_t)msg[off + i * 4 + 3];
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const uint32_t ch = (e & f) ^ (~e & g);
+            const uint32_t t1 = hh + s1 + ch + k[i] + w[i];
+            const uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+            const uint32_t t2 = s0 + maj;
+            hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+        h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+    }
+    std::string out;
+    for (uint32_t v : h) out += wiz::fmt("%08x", v);
+    return out;
+}
+
 // The nX-U16 chain word of a gadget: [addr_lo, addr_hi, 0x30 | segment, variant].
 std::vector<uint8_t> word(uint32_t addr, uint8_t variant = 0x30) {
     return seq({static_cast<int>(addr & 0xFF), static_cast<int>((addr >> 8) & 0xFF),
@@ -84,28 +136,8 @@ const char* hello_source() {
            "}\n";
 }
 
-// The 580 "launcher chung" of the community, byte for byte.
-//   FD 24 | 30 30 | DA 7B 31 30 | FE <code> | <src> | <dst> | <dst-2> |
-//   32 89 31 30 | 30 30 | 74 1F 32 48
-std::vector<uint8_t> community_launcher(uint8_t code, uint16_t src, uint16_t dst) {
-    std::vector<uint8_t> v;
-    const uint8_t s[26] = {
-        0xFD, 0x24, 0x30, 0x30, 0xDA, 0x7B, 0x31, 0x30, 0xFE,
-        0x00,                                                   // code
-        0x00, 0x00,                                             // source
-        0x00, 0x00,                                             // destination
-        0x00, 0x00,                                             // jump target (dst - 2)
-        0x32, 0x89, 0x31, 0x30, 0x30, 0x30, 0x74, 0x1F, 0x32, 0x48};
-    v.assign(s, s + 26);
-    v[9] = code;
-    v[10] = static_cast<uint8_t>(src & 0xFF);
-    v[11] = static_cast<uint8_t>((src >> 8) & 0xFF);
-    v[12] = static_cast<uint8_t>(dst & 0xFF);
-    v[13] = static_cast<uint8_t>((dst >> 8) & 0xFF);
-    v[14] = static_cast<uint8_t>((dst - 2) & 0xFF);
-    v[15] = static_cast<uint8_t>(((dst - 2) >> 8) & 0xFF);
-    return v;
-}
+// The retired direct "launcher chung" is no longer a production path; the
+// launcher is always the RAC @section.launcher now.
 
 }  // namespace
 
@@ -166,62 +198,20 @@ void wt::run_rop() {
     check("rop: #rop inside an inactive #if 0 is ignored",
           !wiz::source_is_rop("#if 0\n#rop\n#endif\nint main() { }\n"));
 
-    // Cross-compiled with RAC/hdcompiler's equivalent low-level source:
-    // The compiler supplies RAC's setlr; setsfr preamble, then emits
-    // buffer_clear; pop xr0 (linepos, pad, adr); printline; render.ddd4.
+    // Cross-compiled with RAC/hdcompiler's equivalent low-level source.
+    // The direct byte emitter is debug-only now; production ROP output comes
+    // from the RSC -> RAC pipeline (tested below).
     const auto rac_equivalent = wiz::build_rop(
         "#rop\n#for 580\n#org E9E0\n#launcher common\n"
         "int main() { screen_del(); print(0x30, 0x01, \"HELLO ROP\"); "
         "render(); }\n", "580");
-    std::vector<uint8_t> rac_bytes = {
-        0xA8, 0x9F, 0x30, 0x30, 0xE0, 0xA0, 0x30, 0x30,
-        0x60, 0x8C, 0x30, 0x30,
-        0x34, 0x7B, 0x31, 0x30, 0x01, 0x30, 0x00, 0xEA,
-        0xC8, 0x3D, 0x32, 0x30, 0x7E, 0x94, 0x30, 0x30,
-        0x30, 0x30, 0x33, 0x30,
-        0x48, 0x45, 0x4C, 0x4C,
-        0x4F, 0x20, 0x52, 0x4F, 0x50, 0x00,
-        // 256-byte null buffer appended by default
-    };
-    for (int i = 0; i < 256; ++i) rac_bytes.push_back(0x00);
-    check("rop: Wiz/RAC equivalent emits identical 580 bytes",
-          rac_equivalent.ok && rac_equivalent.bytes == rac_bytes,
-          hex_of(rac_equivalent.bytes));
     const auto legacy_setup = wiz::build_rop(
         "#rop\n#org E9E0\nint main() { setlr_pc(); setsfr(); screen_del(); }\n", "580");
-    check("rop: legacy setlr_pc spelling uses RAC setlr", legacy_setup.ok &&
-          legacy_setup.bytes.size() >= 4 && legacy_setup.bytes[0] == 0xA8 &&
-          legacy_setup.bytes[1] == 0x9F);
-    // The community launcher, exactly as it is typed into the calculator.
-    const std::vector<uint8_t> rac_launcher = community_launcher(0x02, 0xE9E0, 0xD730);
-    check("rop: 580 common launcher matches RAC", rac_equivalent.launcher == rac_launcher,
-          hex_of(rac_equivalent.launcher));
-    check("rop: 580 common launcher is 26 bytes", rac_equivalent.launcher.size() == 26,
-          wiz::fmt("%zu", rac_equivalent.launcher.size()));
-    check("rop: 580 common launcher ends with the flow gadget",
-          has_seq(rac_equivalent.launcher, seq({0x74, 0x1F, 0x32, 0x48})));
-
-    // The length codes of the community launcher: 01 -> 0x01FE, 02 -> 0x02FE,
-    // 03 -> 0x03FE bytes.
-    const auto l_short = wiz::build_rop("#rop\n#for 580\n#org E9E0\n#launcher common short\n"
-                                         "int main() { render(); }\n", "580");
-    const auto l_medium = wiz::build_rop("#rop\n#for 580\n#org E9E0\n#launcher common medium\n"
-                                          "int main() { render(); }\n", "580");
-    const auto l_long = wiz::build_rop("#rop\n#for 580\n#org E9E0\n#launcher common long\n"
-                                        "int main() { render(); }\n", "580");
-    check("rop: 580 common short launcher uses code 01",
-          l_short.launcher == community_launcher(0x01, 0xE9E0, 0xD730),
-          hex_of(l_short.launcher));
-    check("rop: 580 common medium launcher uses code 02",
-          l_medium.launcher == community_launcher(0x02, 0xE9E0, 0xD730),
-          hex_of(l_medium.launcher));
-    check("rop: 580 common long launcher uses code 03",
-          l_long.launcher == community_launcher(0x03, 0xE9E0, 0xD730),
-          hex_of(l_long.launcher));
-    check("rop: 580 common launcher length codes only change the code byte",
-          l_short.launcher.size() == 26 && l_medium.launcher.size() == 26 &&
-              l_long.launcher.size() == 26 && l_short.launcher[9] == 0x01 &&
-              l_medium.launcher[9] == 0x02 && l_long.launcher[9] == 0x03);
+    check("rop: setlr_pc is the real setlr_pc gadget", legacy_setup.ok &&
+          legacy_setup.bytes.size() >= 4 && legacy_setup.bytes[0] == 0xD0 &&
+          legacy_setup.bytes[1] == 0x08 && legacy_setup.bytes[2] == 0x33);
+    check("rop: 580 common launcher target is the input area",
+          rac_equivalent.launcher_base == 0xD180 && rac_equivalent.base == 0xE9E0);
 
     const auto r580 = wiz::build_rop(hello_source(), "580");
     const size_t p580 = pool_offset(r580.bytes, "ROP ADDRESS");
@@ -770,14 +760,10 @@ void wt::run_rop() {
     check("rop: 880 bitmap uses the 880 gadgets",
           has_seq(r880_bitmap.bytes, seq({0x60, 0x7E, 0x30, 0x30})) &&
               has_seq(r880_bitmap.bytes, seq({0x58, 0x89, 0x31, 0x30})));
-    // The 880 launcher stays the short jump stub: trigger, payload - 2 and
-    // the "sp = er6,pop er8" gadget of the 880 (0x21344).
-    // The 880 launcher stays the short jump stub.
-    check("rop: 880 common launcher stays 8 bytes",
-          r880.launcher.size() == 8 && r880.launcher[0] == 0xFD && r880.launcher[1] == 0x26 &&
-              has16(r880.launcher, 0xE330 - 2) &&
-              has_seq(r880.launcher, seq({0xC0, 0x75, 0x32, 0x30})),
-          hex_of(r880.launcher));
+    // The launcher bytes themselves come from RAC now; the direct build only
+    // records where the launcher goes.
+    check("rop: 880 common launcher stays in the input area",
+          r880.launcher_base == 0x9268, wiz::fmt("%04X", r880.launcher_base));
 
     // ---------------------------------------------------------------- custom launcher
     const auto r_custom = wiz::build_rop("#rop\n#for 580\n#org E9E0\n"
@@ -790,20 +776,10 @@ void wt::run_rop() {
     check("rop: custom common pointers target backup address",
           r_custom.ok && p_custom < r_custom.bytes.size() &&
               has16(r_custom.bytes, 0xD800 + p_custom));
-    check("rop: custom common launcher uses the given source and destination",
-          r_custom.launcher == community_launcher(0x03, 0xD800, 0xD900),
-          hex_of(r_custom.launcher));
 
     const auto rsimple = wiz::build_rop("#rop\n#launcher simple\nint main() { render(); }\n", "580");
     check("rop: simple launcher remains in-place", rsimple.ok && rsimple.base == 0xE9E0 &&
-                                                        has16(rsimple.launcher, 0xE9DE));
-    check("rop: simple launcher is unchanged",
-          rsimple.launcher.size() == 10 && rsimple.launcher[0] == 0x78 &&
-              rsimple.launcher[1] == 0x5C && rsimple.launcher[4] == 0xDE &&
-              rsimple.launcher[5] == 0xE9 && rsimple.launcher[6] == 0x60 &&
-              rsimple.launcher[7] == 0x0D && rsimple.launcher[8] == 0x32 &&
-              rsimple.launcher[9] == 0x30,
-          hex_of(rsimple.launcher));
+                                                        rsimple.launcher_simple);
 
     // ---------------------------------------------------------------- guide primitives
     {
@@ -922,103 +898,197 @@ void wt::run_rop() {
           r_keys.log);
 
     // ---------------------------------------------------------------- RAC source
-    // --emit-rsc writes a real RAC source: sections, labels, calls, string
-    // literals and eval(adr(...)) references, with hex for raw data.
+    // --emit-rsc writes a real RAC source: sections, labels, mnemonics,
+    // string literals and eval(adr(...)) references.
     {
         std::string err;
-        const std::string rsc = wiz::rop_to_rsc(rac_equivalent, false, err);
+        const std::string rsc = wiz::rop_to_rsc(rac_equivalent, err);
         check("rop: --emit-rsc emits a RAC main section",
               err.empty() && rsc.find("@section.main at 0xd730 backup 0xe9e0") !=
                                 std::string::npos,
               err);
-        check("rop: --emit-rsc uses lbl, call and hex syntax",
-              rsc.find("lbl main") != std::string::npos &&
-                  rsc.find("call 09fa8") != std::string::npos &&
-                  rsc.find("call 23dc8") != std::string::npos &&
-                  rsc.find("hex 01 30") != std::string::npos,
+        check("rop: --emit-rsc uses RAC mnemonics",
+              rsc.find("    setlr") != std::string::npos &&
+                  rsc.find("    setsfr") != std::string::npos &&
+                  rsc.find("    buffer_clear") != std::string::npos &&
+                  rsc.find("    printline") != std::string::npos &&
+                  rsc.find("    render.ddd4") != std::string::npos &&
+                  rsc.find("    pop xr0") != std::string::npos,
               rsc);
         check("rop: --emit-rsc uses string literals and eval(adr()) pointers",
               rsc.find("\"HELLO~ROP\"") != std::string::npos &&
                   rsc.find("eval(adr(str_1)+dist.main)") != std::string::npos,
               rsc);
-        check("rop: --emit-rsc writes the compiler launcher section",
+        check("rop: --emit-rsc always emits the RAC launcher",
               rsc.find("@section.launcher at 0xd180") != std::string::npos &&
-                  rsc.find("fd 24 30 30") != std::string::npos,
+                  rsc.find("    hex fd 24 30 30") != std::string::npos &&
+                  rsc.find("    setlr\n") != std::string::npos &&
+                  rsc.find("    setsfr\n") != std::string::npos &&
+                  rsc.find("pr_org(main), pr_backup(main)") != std::string::npos &&
+                  rsc.find("call 09451") != std::string::npos &&
+                  rsc.find("hex fe 01") != std::string::npos,
               rsc);
         std::string err2;
-        const std::string rsc_launcher = wiz::rop_to_rsc(rac_equivalent, true, err2);
-        check("rop: --rac-launcher emits the RAC launcher section",
-              err2.empty() && rsc_launcher.find("pr_org(main), pr_backup(main)") !=
-                                  std::string::npos &&
-                  rsc_launcher.find("call 09451") != std::string::npos &&
-                  rsc_launcher.find("er14 = eval(pr_org(main) - 2)") != std::string::npos,
-              err2);
+        const auto simple = wiz::build_rop(
+            "#rop\n#for 580\n#org E9E0\n#launcher simple\nint main() { render(); }\n", "580");
+        const std::string rsc_simple = wiz::rop_to_rsc(simple, err2);
+        check("rop: #launcher simple emits the RAC stub",
+              rsc_simple.find("    pop er14") != std::string::npos &&
+                  rsc_simple.find("    eval(pr_org(main) - 2)") != std::string::npos &&
+                  rsc_simple.find("    sp = er14, pop er14") != std::string::npos,
+              rsc_simple);
     }
 
-    // Optional external backend: the emitted .rsc must be accepted by RAC.
+    // ---------------------------------------------------------------- raw-rsc
+    {
+        std::string raw, err;
+        const std::string src = "#rop\n#for 580\n#org E9E0\n#launcher common\n"
+                                "#raw-rsc {\n"
+                                "@section.main at 0xd730 backup 0xe9e0\n"
+                                "lbl start\n    hex 00\n"
+                                "@section.launcher at 0xd180\n    hex 00\n"
+                                "}\n";
+        check("rop: #raw-rsc is extracted",
+              wiz::extract_raw_rsc(src, raw, err) && raw.find("lbl start") != std::string::npos,
+              err);
+        std::string rsc_err;
+        const std::string rsc = wiz::rop_source_to_rsc(src, "580", "cwiz", rsc_err);
+        check("rop: #raw-rsc becomes the RAC source verbatim",
+              rsc.find("@section.main at 0xd730") != std::string::npos &&
+                  rsc.find("lbl start") != std::string::npos,
+              rsc_err);
+        const std::string bad = "#rop\n#for 580\n#raw-rsc {\n"
+                                "@section.main at 0xd730 backup 0xe9e0\n}\n";
+        const std::string bad_rsc = wiz::rop_source_to_rsc(bad, "580", "cwiz", rsc_err);
+        check("rop: #raw-rsc validates the launcher address",
+              bad_rsc.empty() && rsc_err.find("launcher") != std::string::npos, rsc_err);
+    }
+
+    // RAC is mandatory: no direct fallback and no image on failure.
+    {
+        const std::string rsc_path =
+            (std::filesystem::current_path() / "rop-missing-rac.rsc").string();
+        const auto rr = wiz::build_rop_rac(hello_source(), "580", "cwiz", rsc_path,
+                                           "/nonexistent/rac.py");
+        check("rop: missing RAC is a hard error (no direct fallback)",
+              !rr.ok && rr.payload.empty() && rr.launcher.empty() &&
+                  rr.error.find("fetch_rac.sh") != std::string::npos,
+              rr.error);
+        std::error_code ec;
+        std::filesystem::remove(rsc_path, ec);
+    }
+
+    // RAC discovery: the environment wins, so a Finder-launched app can be
+    // pointed at a checkout without relying on the bundle's working directory.
+    {
+        const char* previous = std::getenv("RAC_COMPILER");
+        const std::string saved = previous ? previous : "";
+        const std::string override_path = "/nonexistent/rac-from-env.py";
+        setenv("RAC_COMPILER", override_path.c_str(), 1);
+        check("rop: RAC_COMPILER overrides RAC discovery",
+              wiz::default_rac_path() == override_path, wiz::default_rac_path());
+        if (previous)
+            setenv("RAC_COMPILER", saved.c_str(), 1);
+        else
+            unsetenv("RAC_COMPILER");
+    }
+
+    // ---------------------------------------------------------------- RAC goldens
+    // The payloads are now the RAC compiler's bytes.  These hashes pin the
+    // emitted sources for the committed examples; the first entry is the
+    // verified arrow-keys program and must never change.
     {
         const std::string rac = wiz::default_rac_path();
         if (!wiz::rac_available(rac)) {
-            std::printf("NOTE rop: RAC compiler not found at %s; skipping the .rsc "
-                        "acceptance test (tools/fetch_rac.sh)\n",
+            std::printf("NOTE rop: RAC compiler not found at %s; skipping the RAC "
+                        "golden tests (tools/fetch_rac.sh)\n",
                         rac.c_str());
         } else {
-            const std::string rsc_path =
-                (std::filesystem::current_path() / "rop-emit-rsc-test.rsc").string();
-            const wiz::RacRopResult rr =
-                wiz::build_rop_rac(hello_source(), "580", "cwiz", rsc_path, rac, false);
-            check("rop: the RAC compiler accepts --emit-rsc output", rr.ok && rr.ran, rr.error);
-            check("rop: the RAC payload is injected at the backup address",
-                  rr.ok && rr.payload_base == 0xE9E0);
-            check("rop: the RAC payload keeps the direct payload length",
-                  rr.ok && rr.payload.size() == rr.direct.bytes.size());
-            // The RAC `call` form writes the plain 32-bit address
-            // ([lo, hi, segment, 00]); the direct chain word carries the input
-            // token class bytes ([lo, hi, 0x30|segment, 0x30]).  Both mask to
-            // the same 20-bit address, so only the two class bytes may differ.
-            bool classes_only = rr.ok;
-            for (size_t i = 0; rr.ok && i < rr.payload.size(); ++i) {
-                if (rr.payload[i] == rr.direct.bytes[i]) continue;
-                const bool class_byte = (i % 4 == 2) || (i % 4 == 3);
-                const int delta = (int)rr.direct.bytes[i] - (int)rr.payload[i];
-                if (!class_byte || (delta != 0x30 && delta != 0x00)) classes_only = false;
-            }
-            check("rop: RAC and direct payloads differ only in the chain class bytes",
-                  classes_only);
-
-            // The same invariant for the committed CWiz ROP examples.
-            const char* examples[] = {
-                "examples/rop/01_hello.cwiz",
-                "examples/rop/02_line.cwiz",
-                "examples/rop/03_common.cwiz",
+            struct Golden {
+                const char* rel;
+                size_t payload;
+                size_t launcher;
+                const char* payload_sha;
+                const char* launcher_sha;
             };
-            for (const char* rel : examples) {
-                std::ifstream in(wt::root_path(rel), std::ios::binary);
+            const Golden goldens[] = {
+                {"examples/rop/arrow_keys.cwiz", 232, 36,
+                 "3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56",
+                 "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
+                {"examples/rop/01_hello.cwiz", 298, 36,
+                 "829243c70570a571a571bb79171d195788b1ca1dc8e3107a068e1e43f71d1712",
+                 "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
+                {"examples/rop/02_line.cwiz", 309, 36,
+                 "940d6eb4af607e6bace5ef4a62ea112afa2102528fc6043112bfafc674592d5c",
+                 "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
+                {"examples/rop/03_common.cwiz", 323, 36,
+                 "efc8c099b8c2d2e6dfd4d996f235e0a0fbe21fa068256e54a73f0be1a17280d0",
+                 "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0"},
+            };
+            for (const Golden& g : goldens) {
+                std::ifstream in(wt::root_path(g.rel), std::ios::binary);
                 if (!in) {
-                    std::printf("NOTE rop: %s not found; skipping the example comparison\n", rel);
+                    std::printf("NOTE rop: %s not found; skipping the RAC golden\n", g.rel);
                     continue;
                 }
                 std::stringstream buffer;
                 buffer << in.rdbuf();
                 const std::string rsc =
-                    (std::filesystem::current_path() / "rop-example.rsc").string();
-                const wiz::RacRopResult ex =
-                    wiz::build_rop_rac(buffer.str(), "580", "cwiz", rsc, rac, false);
-                bool same_shape = ex.ok && ex.payload.size() == ex.direct.bytes.size();
-                bool same_pool = same_shape;
-                for (size_t i = 0; same_shape && i < ex.payload.size(); ++i) {
-                    if (ex.payload[i] == ex.direct.bytes[i]) continue;
-                    const bool class_byte = (i % 4 == 2) || (i % 4 == 3);
-                    const int delta = (int)ex.direct.bytes[i] - (int)ex.payload[i];
-                    if (!class_byte || delta != 0x30) same_pool = false;
-                }
-                check(std::string("rop: RAC matches the direct example ") + rel,
-                      same_pool, ex.error);
+                    (std::filesystem::current_path() / "rop-golden.rsc").string();
+                const wiz::RacRopResult rr =
+                    wiz::build_rop_rac(buffer.str(), "580", "cwiz", rsc, rac);
+                const std::string payload_sha = sha256_hex(rr.payload);
+                const std::string launcher_sha = sha256_hex(rr.launcher);
+                check(std::string("rop: RAC payload golden ") + g.rel,
+                      rr.ok && rr.payload.size() == g.payload &&
+                          payload_sha == g.payload_sha,
+                      rr.error.empty() ? wiz::fmt("%zu bytes, sha %s", rr.payload.size(),
+                                                 payload_sha.c_str())
+                                       : rr.error);
+                check(std::string("rop: RAC launcher golden ") + g.rel,
+                      rr.ok && rr.launcher.size() == g.launcher &&
+                          launcher_sha == g.launcher_sha,
+                      wiz::fmt("%zu bytes, sha %s", rr.launcher.size(), launcher_sha.c_str()));
+                // The .rsc written to disk is exactly what --emit-rsc emits.
+                std::string rsc_err;
+                const std::string emitted =
+                    wiz::rop_source_to_rsc(buffer.str(), "580", "cwiz", rsc_err);
+                check(std::string("rop: --emit-rsc output is the compiled source ") + g.rel,
+                      !emitted.empty() && emitted == rr.rsc_text, rsc_err);
                 std::error_code ec2;
                 std::filesystem::remove(rsc, ec2);
             }
-            std::error_code ec;
-            std::filesystem::remove(rsc_path, ec);
+
+            // The verified arrow-keys bytes, explicitly.
+            std::ifstream in(wt::root_path("examples/rop/arrow_keys.cwiz"), std::ios::binary);
+            std::stringstream buffer;
+            buffer << in.rdbuf();
+            const std::string rsc =
+                (std::filesystem::current_path() / "rop-arrow.rsc").string();
+            const wiz::RacRopResult arrow =
+                wiz::build_rop_rac(buffer.str(), "580", "cwiz", rsc, rac);
+            check("rop: arrow_keys payload is 232 bytes at E9E0",
+                  arrow.ok && arrow.payload.size() == 232 && arrow.payload_base == 0xE9E0 &&
+                      arrow.payload.size() >= 16 && arrow.payload[0] == 0xD0 &&
+                      arrow.payload[1] == 0x08 && arrow.payload[2] == 0x03 &&
+                      arrow.payload[3] == 0x00 && arrow.payload[8] == 0x02 &&
+                      arrow.payload[9] == 0x26);
+            check("rop: arrow_keys launcher is the verified 36 bytes",
+                  arrow.ok && arrow.launcher_base == 0xD180 && arrow.launcher.size() == 36 &&
+                      arrow.launcher[0] == 0xFD && arrow.launcher[1] == 0x24 &&
+                      arrow.launcher[4] == 0xA8 && arrow.launcher[5] == 0x9F &&
+                      arrow.launcher[8] == 0xE0 && arrow.launcher[9] == 0xA0 &&
+                      arrow.launcher[32] == 0x60 && arrow.launcher[33] == 0x0D);
+            check("rop: arrow_keys payload sha256",
+                  sha256_hex(arrow.payload) ==
+                      "3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56",
+                  sha256_hex(arrow.payload));
+            check("rop: arrow_keys launcher sha256",
+                  sha256_hex(arrow.launcher) ==
+                      "d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0",
+                  sha256_hex(arrow.launcher));
+            std::error_code ec2;
+            std::filesystem::remove(rsc, ec2);
         }
     }
 }

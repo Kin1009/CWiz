@@ -25,9 +25,10 @@ static const char* DOC =
     "\n"
     "Compiles Wiz (.wz) and CWiz (.cwiz) source for Casio ClassWiz calculators and\n"
     "writes a ROM image (.bin) plus an assembly listing (.asm).\n"
-    "A #rop source instead writes the exact RAC/hdcompiler payload to .bin\n"
-    "and its launcher to .launcher.bin.  --emit-rsc writes RAC source; --backend rac\n"
-    "uses an optional external RAC-Compiler checkout (GPL-3.0, not linked).\n"
+    "A #rop source is compiled to RAC source and then through RAC-Compiler\n"
+    "(an optional external GPL-3.0 tool, never linked): the payload goes to .bin\n"
+    "and the RAC @section.launcher to .launcher.bin.  RAC is required for #rop;\n"
+    "run tools/fetch_rac.sh or set RAC_COMPILER.  --emit-rsc writes the source only.\n"
     "\n"
     "A source with a #cwapp section is compiled for the fx-580VN X firmware and\n"
     "patched into the built-in 580 ROM automatically; #slot n chooses the menu slot\n"
@@ -46,11 +47,10 @@ static const char* DOC =
     "  -S                   stop after assembly: write the .asm listing, no .bin\n"
     "  -E, --pp             preprocess only (expand directives) and print to stdout\n"
     "  --emit-rsc           for a #rop source, write RAC source (.rsc) instead of bytes\n"
-    "  --backend direct|rac ROP backend: native emitter (default) or external RAC\n"
     "  --rac PATH           path to rac.py (default: $RAC_COMPILER or\n"
     "                       tools/rac-compiler/rac.py)\n"
-    "  --rac-launcher       use the RAC launcher section instead of the compiler's\n"
-    "                       default launcher (580; --backend rac)\n"
+    "  --backend rac        accepted for scripts; RAC is the only ROP backend\n"
+    "  --rac-launcher       accepted for scripts; the RAC launcher is always used\n"
     "  --no-asm             do not write the .asm listing\n"
     "  --color[=WHEN]       colour diagnostics: auto | always | never  (default: auto)\n"
     "  -v, --verbose        print extra detail\n"
@@ -163,139 +163,76 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
     const std::string model = target == "880" || target == "cwii" ? "880" : "580";
     const std::string lang = language_of(src, args.value("lang"));
     const bool emit_rsc = args.has("emit_rsc");
-    const bool rac_launcher = args.has("rac_launcher");
-    const std::string backend = args.value("backend", "direct");
 
-    if (rac_launcher && model != "580") {
-        d.warning("--rac-launcher only has a 580 template; using the compiler launcher", src);
-    }
+    if (args.has("backend") && args.value("backend") != "rac")
+        d.fatal("the direct ROP backend is retired; use --backend rac (or omit it)", src);
+    if (args.has("rac_launcher"))
+        d.note("--rac-launcher is always on: ROP launchers come from RAC", src);
 
     std::string bin_path, asm_path;
     output_paths(src, args.value("output"), bin_path, asm_path);
     std::string rsc_path = splitext_root(bin_path) + ".rsc";
-    if (emit_rsc && !args.value("output").empty() &&
-        args.value("output").size() >= 4 &&
-        args.value("output").compare(args.value("output").size() - 4, 4, ".rsc") == 0)
-        rsc_path = args.value("output");
+    const std::string out_arg = args.value("output");
+    if (emit_rsc && out_arg.size() >= 4 &&
+        out_arg.compare(out_arg.size() - 4, 4, ".rsc") == 0)
+        rsc_path = out_arg;
     const std::string launcher_path = splitext_root(bin_path) + ".launcher.bin";
 
     if (emit_rsc) {
-        RopResult rop;
-        try {
-            rop = build_rop(text, model, lang);
-        } catch (const std::exception& e) {
-            d.error(e.what(), src);
-            return false;
-        }
-        if (!rop.ok) {
-            d.error(rop.error.empty() ? "ROP compilation failed" : rop.error, src);
-            return false;
-        }
         std::string rsc_error;
-        const std::string rsc = rop_to_rsc(rop, rac_launcher, rsc_error);
+        const std::string rsc = rop_source_to_rsc(text, model, lang, rsc_error);
         if (rsc.empty()) {
             d.error(rsc_error.empty() ? "cannot emit RAC source" : rsc_error, src);
             return false;
         }
         if (!write_text_file(rsc_path, rsc)) d.fatal("cannot write output: " + rsc_path);
-        d.note(fmt("RAC source: payload %zu bytes @ %04X, launcher %zu bytes @ %04X%s",
-                   rop.bytes.size(), rop.base, rop.launcher.size(), rop.launcher_base,
-                   rac_launcher ? ", RAC launcher section" : ""),
+        d.note(fmt("RAC source: compile with rac.py %s",
+                   model == "880" ? "880btg" : "580vnx"),
                src);
         const bool tty = stdout_is_tty();
         std::fputs(fmt("%s %s -> %s\n", paint("RSC", style::OK, tty).c_str(),
                        bold(src, tty).c_str(), rsc_path.c_str())
                        .c_str(),
                    stdout);
-        std::fputs(fmt("    [RAC source %s] %zu payload bytes -> compile with rac.py %s\n",
-                       model.c_str(), rop.bytes.size(),
-                       model == "880" ? "880btg" : "580vnx")
+        std::fputs(fmt("    [RAC source %s] run rac.py %s to produce the payload\n",
+                       model.c_str(), model == "880" ? "880btg" : "580vnx")
                        .c_str(),
                    stdout);
         return true;
     }
 
-    RopResult rop;
     RacRopResult rac;
-    bool used_rac = false;
-    if (backend == "rac") {
-        try {
-            const bool use_rac_launcher = rac_launcher && model == "580";
-            rac = build_rop_rac(text, model, lang, rsc_path, args.value("rac"),
-                                use_rac_launcher);
-        } catch (const std::exception& e) {
-            d.error(e.what(), src);
-            return false;
-        }
-        if (rac.ok) {
-            used_rac = true;
-            rop = rac.direct;
-        } else {
-            // Never a silent wrong image: say why and build with the native
-            // backend instead.
-            d.warning("RAC backend unavailable: " + rac.error +
-                          "; falling back to the direct backend",
-                      src);
-            if (rac.direct.ok) {
-                rop = rac.direct;
-            } else {
-                try {
-                    rop = build_rop(text, model, lang);
-                } catch (const std::exception& e) {
-                    d.error(e.what(), src);
-                    return false;
-                }
-            }
-        }
-    } else {
-        try {
-            rop = build_rop(text, model, lang);
-        } catch (const std::exception& e) {
-            d.error(e.what(), src);
-            return false;
-        }
+    try {
+        rac = build_rop_rac(text, model, lang, rsc_path, args.value("rac"));
+    } catch (const std::exception& e) {
+        d.error(e.what(), src);
+        return false;
     }
-    if (!rop.ok) {
-        d.error(rop.error.empty() ? "ROP compilation failed" : rop.error, src);
+    if (!rac.ok) {
+        // RAC is mandatory: never write an image from a failed/absent backend.
+        d.error(rac.error.empty() ? "RAC compilation failed" : rac.error, src);
+        d.help("install RAC-Compiler with tools/fetch_rac.sh, or set RAC_COMPILER "
+               "to its rac.py");
         return false;
     }
 
-    std::vector<uint8_t> payload = used_rac ? rac.payload : rop.bytes;
-    std::vector<uint8_t> launcher = used_rac ? rac.launcher : rop.launcher;
-    const uint32_t payload_base = used_rac ? rac.payload_base : rop.base;
-    const uint32_t launcher_base = used_rac ? rac.launcher_base : rop.launcher_base;
-    std::string launcher_hex = rop_launcher_hex(launcher);
+    const std::vector<uint8_t>& payload = rac.payload;
+    const std::vector<uint8_t>& launcher = rac.launcher;
+    const uint32_t payload_base = rac.payload_base;
+    const uint32_t launcher_base = rac.launcher_base;
+    const std::string launcher_hex = rop_launcher_hex(launcher);
 
-    if (used_rac) {
-        d.note(fmt("RAC compiler: %s (%s)", rac.rac_path.c_str(), rac.rsc_path.c_str()), src);
-        if (rac.launcher_from_rac) {
-            d.note(fmt("launcher: RAC @section.launcher %zu bytes @ %04X replaces the "
-                       "compiler launcher",
-                       launcher.size(), launcher_base),
-                   src);
-        } else {
-            d.note(fmt("launcher: compiler default %zu bytes @ %04X (the RAC launcher is "
-                       "not used; pass --rac-launcher)",
-                       launcher.size(), launcher_base),
-                   src);
-        }
-        if (rac.payload_diff) {
-            d.warning(fmt("RAC payload differs from the direct backend in %zu byte(s); the "
-                          "RAC payload is used",
-                          rac.payload_diff),
-                      src);
-        } else {
-            d.note("RAC payload matches the direct backend byte for byte", src);
-        }
-    }
+    d.note(fmt("RAC compiler: %s", rac.rac_path.c_str()), src);
+    d.note(fmt("RAC source: %s", rac.rsc_path.c_str()), src);
+    d.note(fmt("launcher: RAC @section.launcher %zu bytes @ %04X", launcher.size(),
+               launcher_base),
+           src);
 
     std::string listing = fmt("# ROP payload @ %04X (%zu bytes)\n# launcher @ %04X (%zu bytes)\n",
                               payload_base, payload.size(), launcher_base, launcher.size());
     listing += "# launcher: " + launcher_hex + "\n";
-    if (used_rac)
-        listing += "# built by the RAC backend: " + rac.rsc_path + "\n" +
-                   "# RAC launcher: " + (rac.launcher_from_rac ? "yes" : "no") + "\n";
-    listing += rop.log;
+    listing += "# built by RAC from " + rac.rsc_path + "\n";
+    if (!rac.log.empty()) listing += "\n# ---- RAC ----\n" + rac.log;
     try {
         if (!args.has("no-asm") && !write_text_file(asm_path, listing))
             d.fatal("cannot write output: " + asm_path);
@@ -314,9 +251,8 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
                    out_desc.c_str())
                    .c_str(),
                stdout);
-    std::fputs(fmt("    [ROP %s%s] payload %zu bytes @ %04X; launcher %zu bytes @ %04X\n",
-                   model.c_str(), used_rac ? " via RAC" : "", payload.size(), payload_base,
-                   launcher.size(), launcher_base)
+    std::fputs(fmt("    [ROP %s via RAC] payload %zu bytes @ %04X; launcher %zu bytes @ %04X\n",
+                   model.c_str(), payload.size(), payload_base, launcher.size(), launcher_base)
                    .c_str(),
                stdout);
     if (!args.has("asm_only"))
@@ -484,7 +420,7 @@ int main(int argc, char** argv) {
         {"-E", "pp"},
         {"--pp", "pp"},
         {"--emit-rsc", "emit_rsc"},
-        {"--backend", "backend", true, false, "", {"direct", "rac"}},
+        {"--backend", "backend", true, false, "rac", {"rac"}},
         {"--rac", "rac", true},
         {"--rac-launcher", "rac_launcher"},
         {"--no-asm", "no-asm"},

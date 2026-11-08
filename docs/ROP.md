@@ -2,8 +2,9 @@
 
 A ROP program is a `.cwiz` or `.wz` file with a `#rop` line. CWiz sources use
 the C-like syntax shown here; Wiz sources use indentation and are translated to
-the same ROP backend. The compiler emits a gadget chain instead of a ROM image,
-and the emulator injects it into RAM.
+the same ROP backend. `wizc` emits RAC source and compiles it with the external
+[RAC-Compiler](#rac-compiler-required-external); the result is a gadget chain
+instead of a ROM image, and the emulator injects it into RAM.
 
 ```c
 #rop
@@ -45,26 +46,25 @@ line. LEFT+EXE is only meaningful for the 880/program-list variant.
 
 ## Chain encoding
 
-Every gadget is four bytes:
+Every gadget is four bytes. RAC's `call` writes the address as a plain 32-bit
+little-endian value:
 
 ```
-[ addr_lo, addr_hi, 0x30 | segment, variant ]
+[ addr_lo, addr_hi, segment, 00 ]      payload (D730/E330)
+[ addr_lo, addr_hi, 0x30|segment, 30 ] launcher (input area D180/9268)
 ```
 
-The nX-U16 code space is 20 bit: a four-bit code segment plus a 16-bit program
-counter. The third byte carries the segment (`0x30 | segment`), so an address
-above `0xFFFF` keeps its segment: `printline` at `0x23DC8` is `C8 3D 32 30`,
-not `C8 3D 30 30`. The fourth byte is the call variant: `0x30` calls and links,
-`0x48` branches without linking (used by the launcher's last word).
+The launcher uses the calculator's input-area token class (`0x30`); the payload
+does not need it. The nX-U16 code space is 20 bit: a four-bit code segment plus
+a 16-bit program counter. A gadget above `0xFFFF` keeps its segment, so
+`printline` at `0x23DC8` is `C8 3D 02 00` in the payload (`C8 3D 32 30` when
+typed as a launcher token).
 
 | bytes | meaning | example |
 |---|---|---|
-| `xx xx 3s 30` | gadget call, pop or flow in segment `s` | `34 7B 31 30` = pop `0x17B34` |
-| `xx xx 3s 48` | branch without link (launcher jump) | `74 1F 32 48` |
-
-The third byte does not encode whether a gadget is a call, a pop or a flow
-gadget; those are all ordinary chain words. Only the fourth byte changes the
-call variant.
+| `xx xx 0s 00` | payload gadget call in segment `s` | `34 7B 01 00` = pop `0x17B34` |
+| `xx xx 3s 30` | input-area token call in segment `s` | `34 7B 31 30` = pop `0x17B34` |
+| `xx xx 3s 48` | branch without link (old launcher form) | `74 1F 32 48` |
 
 The class bytes are **derived from the address segment**, not from the gadget
 kind. Never add a fixed `0x30300000` to the address: that produces the same
@@ -180,50 +180,47 @@ Known limitation: the 880 table has no `cmp_ea`, `pop ea` or `memcpy_length_rn/8
 
 ## 580 common launcher
 
-The 26 byte *launcher chung* is byte-identical to the one used by the existing
-community programs:
+`#launcher common` is emitted as RAC source and compiled by RAC. It is the
+launcher used by the community examples:
 
 ```
 FD 24 30 30                     trigger + input-area prefix
-DA 7B 31 30                     copy-with-length gadget
-FE 02                           copy length 0x02FE (766 bytes, default)
-E0 E9                           source E9E0 (backup area)
-30 D7                           destination D730 (execution area)
-2E D7                           execution address - 2
-32 89 31 30                     pop 0x8932
-30 30                           pad
-74 1F 32 48                     sp = er6, pop er8 (branch)
+A8 9F 30 30                     setlr
+E0 A0 30 30                     setsfr
+34 7B 31 30                     pop xr0
+<dst> <src>                     pr_org(main), pr_backup(main)
+51 94 30 30                     call 09451 (memcpy)
+FE <code>                       RAC length code 01/02/03
+42 07 31 30                     pop er14
+<main - 2>                      execution address - 2
+60 0D 32 30                     sp = er14, pop er14
 ```
 
 The copy length is selected by the RAC length code: `01` = `0x01FE` (510
-bytes), `02` = `0x02FE` (766 bytes, default), `03` = `0x03FE` (1022 bytes). The
-payload must fit in the selected length.
+bytes), `02` = `0x02FE` (766 bytes), `03` = `0x03FE` (1022 bytes). The emitter
+picks the smallest code that fits the payload.
 
 The launcher copies the payload from the backup area (`E9E0`) to the execution
 area (`D730`) and continues there. Code labels, branch targets and the
 `keytable` therefore use the execution address `D730`; string literals are
-resolved against the backup copy at `E9E0`, which remains valid. The bytes
-themselves are injected at `E9E0`. The `pop xr0` / `BL memcpy` launcher is a
-different variant and must not be substituted byte-for-byte.
+resolved against the backup copy at `E9E0`, which remains valid.
 
 ### 880 common launcher
 
-```
-FD 26                           trigger
-2E E3                           payload address - 2 (E330 - 2)
-C0 75 32 30                     sp gadget
-```
+The 880 payload executes in place (`E330`), so the launcher stays the 8-byte
+stub: `FD 26`, `pr_backup(main) - 2`, `C0 75 32 30`. The source is still RAC
+source (`hex fd 26`, `eval(...)`, `call 3275C0`) and RAC emits the bytes.
 
 ### Simple launcher
 
 `#launcher simple` (or `#launcher <address>`, for compatibility) emits the
-10-byte stub instead. Without an explicit address the launcher goes to the
-program input area (`D180` on the 580, `9268` on the 880):
+RAC stub instead. Without an explicit address the launcher goes to the program
+input area (`D180` on the 580, `9268` on the 880):
 
 ```
-78 5C 31 30   pop er14
-<payload-2>   little-endian
-60 0D 32 30   sp = er14, pop er14
+pop er14
+eval(pr_org(main) - 2)
+sp = er14, pop er14
 ```
 
 After the stub, SP points exactly at the payload.
@@ -231,11 +228,10 @@ After the stub, SP points exactly at the payload.
 ### Options
 
 ```
-#launcher common                 // defaults: RAC medium launcher, #org, D730 (580)
-#launcher common short           // 01 short, 02 medium, 03 long
-#launcher common long E9E0 D730  // length, backup, execution address
-#launcher simple                 // 10-byte stub
+#launcher common                 // RAC launcher (length code chosen to fit)
+#launcher simple                 // RAC pop-er14 stub
 #launcher 8154                   // stub placed at an explicit address (must be RAM)
+#launcher common E9E0 D730       // explicit backup/main addresses
 #pad 128                        // trailing null buffer size (default 256)
 #nopad                          // no trailing null buffer
 ```
@@ -246,72 +242,111 @@ launcher separately as `<name>.launcher.bin`. "Build & Run" also injects both
 blocks into the running model. Use **Copy launcher** in the toolbar to put the
 launcher hex on the clipboard.
 
-## RAC backend (optional, external)
+## RAC-Compiler (required, external)
 
-RAC-Compiler is a separate GPL-3.0 project
-([luongvantam/RAC-Compiler](https://github.com/luongvantam/RAC-Compiler)). It is
-an **optional external backend**: `wizc` only runs `rac.py` as a separate
-process and never links or copies its code into the Wiz compiler. The direct
-backend above is complete and needs neither Python nor RAC.
+RAC-Compiler ([luongvantam/RAC-Compiler](https://github.com/luongvantam/RAC-Compiler))
+is the **only** ROP backend. It is a separate GPL-3.0 program: `wizc` runs
+`rac.py` as a separate process and never links or copies its code. The licence
+boundary is the process boundary.
+
+ROP compilation therefore needs a RAC checkout:
 
 ```sh
-tools/fetch_rac.sh                 # clone into tools/rac-compiler (gitignored)
-wizc --emit-rsc hello.cwiz         # write hello.rsc, a RAC source
-wizc --backend rac hello.cwiz      # compile through RAC and use its bytes
-wizc --backend rac --rac-launcher hello.cwiz
-wizc --backend rac --rac /path/to/rac.py hello.cwiz   # or $RAC_COMPILER
+tools/fetch_rac.sh                  # clone into tools/rac-compiler (gitignored)
+wizc hello.cwiz                     # RSC -> RAC -> payload + launcher
+wizc --emit-rsc hello.cwiz          # write the RAC source only
+wizc --rac /path/to/rac.py hello.cwiz
+RAC_COMPILER=/path/to/rac.py wizc hello.cwiz
 ```
 
-* `--emit-rsc` writes `<name>.rsc` instead of a `.bin`. The file uses real RAC
-  syntax: `@section.main at 0xd730 backup 0xe9e0`, `lbl`, `call <address>`,
-  `hex`, `"..."` string literals and `eval(adr(label)+dist.main)` pointers. Any
-  byte that has no safe RAC spelling stays in a `hex` block, so the output
-  always compiles.
-* `--backend rac` emits the `.rsc`, runs `python3 rac.py <model> <file>`
-  (`580vnx` or `880btg`), parses the section report and writes the RAC payload
-  at its backup address (`E9E0` on the 580) and the launcher at `D180`/`9268`.
-* On any RAC failure — missing clone, no Python, a compiler error or an empty
-  section — `wizc` prints a warning and falls back to the direct backend. It
-  never leaves a partially correct image behind.
-* `--rac-launcher` uses the launcher that RAC compiles from
-  `@section.launcher` instead of the compiler's launcher chung. The substitution
-  is stated in the output. It is 580-only; on the 880 the compiler launcher is
-  kept (and a warning says so).
+`wizc` writes the RAC-compiled payload at its backup address (`E9E0` on the
+580, `E330` on the 880) to `<name>.bin`, and the RAC `@section.launcher` to
+`<name>.launcher.bin` (`D180`/`9268`). It also keeps `<name>.rsc` next to
+them. There is **no fallback to a native emitter**: if RAC is missing, Python
+is missing, or the compiler reports an error, `wizc` stops with a diagnostic
+and writes no image.
 
-### Byte differences between the two backends
+`--backend rac` is accepted for existing scripts and is the only value.
+`--rac-launcher` is accepted but always on: the launcher now always comes from
+`@section.launcher`.
 
-`--backend rac` uses the RAC payload as-is. For the same source it is the same
-length as the direct payload and the string pool and key tables are identical,
-but the two encodings of a *gadget call word* differ:
+### Launcher shapes
 
-| word | direct backend | RAC `call 17b34` |
+`#launcher` selects the RSC launcher:
+
+* `#launcher common` (default) — the community/RAC launcher: trigger
+  `FD 24 30 30`, `setlr`, `setsfr`, `xr0 = pr_org(main), pr_backup(main)`,
+  `call 09451`, `hex fe 0N` (510/766/1022 bytes), then
+  `er14 = eval(pr_org(main) - 2)` and `sp = er14, pop er14`.
+* `#launcher simple` — the 10-byte `pop er14` stub.
+* `#launcher <address>` — the stub at an explicit input-area address.
+
+The addresses are RAC section symbols, so the RAC compiler resolves the copy
+source, destination and jump target itself.
+
+### Emitting RAC source
+
+`--emit-rsc` writes the source that RAC compiles. For ordinary CWiz code the
+emitter uses RAC idioms: `@section.main at … backup …`, `lbl`, `setlr`,
+`setsfr`, `buffer_clear`, `line_print`, `render.ddd4`, `xr0 = … , adr(text)`,
+`call <address>`, string literals, key tables as word/label pairs and
+`eval(adr(label) - 2)` branch targets.
+
+Some programs are already byte-verified as hand-written RAC. A `.cwiz` source
+may pass a complete RAC document through unchanged:
+
+```c
+#rop
+#for 580
+#org 0xE9E0
+#launcher common
+
+#raw-rsc {
+@section.main at 0xd730 backup 0xe9e0
+lbl start
+    setlr_pc
+    setsfr
+...
+@section.launcher at 0xd180
+hex fd 24 30 30
+setlr
+...
+}
+```
+
+The compiler validates `#org` (the `@section.main` backup address) and the
+`#launcher` address, then hands the text to RAC verbatim. This is how
+`examples/rop/arrow_keys.cwiz` is kept identical to the hardware-verified
+program: 232 payload bytes at `E9E0` (`d0 08 03 00 e0 a0 00 00 …`) and the
+36-byte launcher at `D180`:
+
+```
+fd 24 30 30 a8 9f 30 30 e0 a0 30 30 34 7b 31 30
+30 d7 e0 e9 51 94 30 30 fe 01 42 07 31 30 2e d7
+60 0d 32 30
+```
+
+`wiztests` pins both blocks by SHA-256:
+
+| block | bytes | SHA-256 |
 |---|---|---|
-| `pop xr0` | `34 7B 31 30` | `34 7B 01 00` |
-| `printline` | `C8 3D 32 30` | `C8 3D 02 00` |
-| setlr (`09FA8`) | `A8 9F 30 30` | `A8 9F 00 00` |
-
-The first two bytes are the low 16 bits of the address in both cases. The
-direct emitter stores the input-area token class in bytes 3–4 (`0x30 | segment`
-and `0x30`); RAC's `call` stores the plain 32-bit address (`segment` and `00`).
-Both mask to the same 20-bit code address, so the chain is equivalent. Branch
-targets (2 bytes, `label - 2`), key tables and string pointers are byte-for-byte
-identical. `wizc` reports the number of differing bytes as a warning rather
-than hiding it.
-
-The launchers also differ by design:
-
-* compiler default (580): the 26-byte *launcher chung* above.
-* RAC launcher (`--rac-launcher`, 580): 32 bytes —
-  `FD 24 30 30`, `setlr_pc`, `pop xr0` (`main`, `backup`), `call 09451`,
-  `FE <length code>`, `pop er14` (`main - 2`), `sp = er14, pop er14`.
+| payload | 232 | `3472dd6dd095bd3305faf0563501b0c34d474eccdbc3972457409290f8f5da56` |
+| launcher | 36 | `d47950caf9b6e48d5a8e7097ad3eefc411baa5b31751cf2e4a97d3b2d9be95d0` |
 
 ## Running from the emulator
 
-"Build & Run" in the debugger uses the RAC backend when it can find
-`rac.py` (`$RAC_COMPILER`, then `tools/rac-compiler/rac.py`) and otherwise the
-direct backend. It writes `<name>.bin`, `<name>.asm` and (with RAC)
-`<name>.rsc`, pauses the model, writes the payload and the launcher, and
-resumes.
+"Build & Run" for a ROP program always goes through RAC. It writes
+`<name>.bin`, `<name>.asm` and `<name>.rsc`, pauses the model, writes the
+payload and the RAC launcher, verifies both blocks, and resumes. Without RAC it
+shows an actionable error (`tools/fetch_rac.sh`, or `RAC_COMPILER`) and does
+not build.
+
+A Finder-launched app cannot rely on the working directory. RAC is found in
+this order: `$RAC_COMPILER`, `tools/rac-compiler/rac.py` relative to the
+working directory (and its parents), `$WIZ_ROOT/tools/rac-compiler/rac.py`, then
+a bundle copy under the Wiz data directory (`<data>/tools/rac-compiler/rac.py`).
+Shipping `tools/rac-compiler` as `Resources/wiz/tools/rac-compiler` in the app
+makes the backend available without environment variables.
 
 A launcher placed in the program input area (`D180` on the 580, `9268` on the
 880) is **firmware data, not CPU code**: the calculator starts it with its
@@ -321,8 +356,8 @@ not do that; it verifies both blocks and tells you to press EXE. Launchers
 placed outside the input area are transferred to with PC (word address =
 `base / 2`).
 
-The `.asm` listing is written in the community ROP source style, so it can be
-read next to the hand written examples:
+The `.rsc` source is written in the community ROP style, so it can be read
+next to the hand written examples:
 
 ```
 @section.main at 0xd730 backup 0xe9e0
@@ -337,8 +372,8 @@ lbl main
     printline               # 23DC8
     render.ddd4             # 0947E
     pop er6                 # 13AB0
-    adr(keys) - 2           # D806
-    sp=er6,pop er8          # 21F74
+    eval(adr(keys) - 2)     # D806
+    sp = er6,pop er8        # 21F74
 lbl keys
     pop er0                 # 12602
     adr(keyslot)            # D81A
@@ -350,7 +385,7 @@ lbl keyslot
 ...
 lbl keytable_1
     hex 80 04               # KEY_UP
-    adr(up) - 2             # D78E
+    eval(adr(up) - 2)       # D78E
 lbl str_1
     # "PRESS A KEY"
     hex 50 52 45 53 53 20 41 20
