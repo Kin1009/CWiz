@@ -59,6 +59,7 @@ int main(int argc, char** argv) {
     run_guarded("test_cwmode", wt::run_cwmode);
     run_guarded("test_cwlink", wt::run_cwlink);
     run_guarded("test_unsigned", wt::run_unsigned);
+    run_guarded("test_prelude_ports", wt::run_prelude_ports);
 
     std::printf("\n%d checks, %d failure(s)\n", wt::checks(), (int)wt::fails().size());
     if (!wt::fails().empty()) {

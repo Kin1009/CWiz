@@ -59,9 +59,18 @@ languages. You cannot define a function with one of these names. Unless noted, a
 | `renderStatus()` | 0 | — | Copy only the first 23 status bytes from SB2 to the LCD plane(s). |
 | `buffered(on)` | 1 | — | Compatibility no-op. Drawing always targets SB2. |
 | `flip()` | 0 | — | Alias for `render()` (kept for older programs). |
+| `getpixel(x, y)` | 2 | 0/1 | Read one pixel from the shadow buffer (SB2). Source-level helper included on demand in both languages. |
+| `clear_rect(x, y, w, h)` | 4 | — | Clear a rectangle in SB2. Source-level helper in both languages. |
+| `invert_rect(x, y, w, h)` | 4 | — | Invert a rectangle in SB2. Source-level helper in both languages. |
+| `copy_rect(x, y, w, h, x2, y2)` | 6 | — | Copy a rectangle inside SB2; the copy runs forward, so overlap order is the caller's responsibility. Source-level helper in both languages. |
+| `wipe()` | 0 | — | **CWiz only.** Zero all of RAM (`0xD000..0xFFFF`) and halt. Register-only, so it erases its own return frame. |
+| `recover()` | 0 | — | **CWiz only.** Zero RAM except the `0xDBD0..0xDBDF` integrity span, then jump to the stock reset stub. |
+| `reset()` | 0 | — | **CWiz only.** Jump directly to the stock reset stub at `0:A1CE`. |
 | `exit()` | 0 | — | **cwapp only.** Leave the program through the saved firmware stack and open the firmware mode menu. This is the same clean return as MENU: no reset and no splash. |
 | `preserve(addr, len)` | 2 | 1/0 | **cwapp only.** Register a RAM range and snapshot it immediately. Returns 1 on success, 0 for an invalid range or a full table (8 ranges, 128 bytes). |
 | `restore_preserved()` | 0 | — | **cwapp only.** Restore every registered range byte for byte immediately. MENU, `exit()` and `main()` return do this automatically. |
+| `__va_start()` | 0 | address | **CWiz only.** Initialise a variadic argument cursor; valid only inside a function declared with `...`. |
+| `__va_arg(ap)` | 1 | value | **CWiz only.** Read one 16-bit variadic argument and advance `ap`, which is a `va_list*` (see the `va_arg(ap, type)` macro in `<stdarg.h>`). |
 | `_hspan(x0, x1, y, c)` | 4 | — | Internal fast span fill, `x0..x1-1`. Requires `0 <= x0 < x1 <= 192`, `0 <= y < ROWS`. |
 | `ticks()` | 0 | timer count | Free-running Timer0 counter, **8 counts per millisecond**. The timer is started on the first call. |
 | `delay_ms(ms)` | 1 | — | Wait `ms` milliseconds using that timer (calibrated, unlike `delay`). Negative values return immediately. |
@@ -73,14 +82,19 @@ matters and `ticks()` when you need to poll elapsed time.
 
 `key_hit` state is kept in runtime RAM; see the [memory map](#memory-map).
 
+In CWiz, `#include <stdarg.h>` maps `va_start(ap, last)` to `__va_start()` and
+`va_arg(ap, type)` to `__va_arg(&ap)`; `va_end`/`va_copy` are no-op/copy macros.
+A variadic function can pass up to 16 extra 16-bit arguments in its argument array.
+
 ---
 
 ## Standard library
 
 These are written in the source language and included on demand (Wiz: the `PRELUDE` in
-`compiler/src/wiz.cpp`; CWiz: `PRELUDE_SRC` in `compiler/src/cwiz.cpp`). Only the routines a program
-actually calls are compiled in, and **defining a function with the same name replaces the library
-version**.
+`compiler/src/wiz.cpp`; CWiz: `PRELUDE_SRC` in `compiler/src/cwiz.cpp` plus the upstream-port
+headers `prelude_shapes.hpp`, `prelude_input.hpp` and `prelude_heap_rtc.hpp`). Only the routines a
+program actually calls are compiled in, and **defining a function with the same name replaces the
+library version**.
 
 ### Math
 
@@ -90,12 +104,6 @@ version**.
 | `min(a, b)` / `max(a, b)` | smaller / larger |
 | `clamp(v, lo, hi)` | `v` constrained to `[lo, hi]` |
 | `sign(n)` | `-1`, `0` or `1` |
-
-### Input
-
-| Call | Description |
-|------|-------------|
-| `wait_key()` | waits for all keys to be released, then for a press; returns the key |
 
 ### Random numbers
 
@@ -120,6 +128,30 @@ All coordinates are clipped to the visible screen. `c` is the colour: non-zero d
 | `line(x0, y0, x1, y1, c=1)` | Bresenham line |
 | `circle(cx, cy, r, c=1)` | circle outline |
 | `disc(cx, cy, r, c=1)` | filled circle |
+| `getpixel(x, y)` | read one pixel from the shadow buffer (0/1) |
+| `clear_rect(x, y, w, h)` | clear a rectangle in the shadow buffer |
+| `invert_rect(x, y, w, h)` | invert a rectangle in the shadow buffer |
+| `copy_rect(x, y, w, h, x2, y2)` | copy a rectangle in the shadow buffer (forward order) |
+
+In CWiz, `hline` and `vline` honour the clip window set by `clip()`; the default window is the
+whole screen.
+
+### Shapes and clipping
+
+Ported from the upstream Wiz PRELUDE (available in Wiz and CWiz).  All of these are source-level
+functions in the standard library; `c` is the colour and defaults to `1`.
+
+| Call | Description |
+|------|-------------|
+| `clip(x=0, y=0, w=192, h=64)` | Restrict `hline`/`vline` (and therefore `rect`/`fillrect`) to the intersection of the given rectangle with the screen. Reset with `clip()`. |
+| `ellipse(cx, cy, rx, ry, c=1)` | Midpoint ellipse outline. |
+| `fillellipse(cx, cy, rx, ry, c=1)` | Filled ellipse, drawn as clipped horizontal spans. |
+| `tri(x0, y0, x1, y1, x2, y2, c=1)` | Triangle outline via three `line()` calls. |
+| `filltri(x0, y0, x1, y1, x2, y2, c=1)` | Filled triangle via horizontal spans. |
+| `roundrect(x, y, w, h, r, c=1)` | Rectangle with radius-`r` corners. |
+
+The clip window is kept in four globals (`_clip_x0`, `_clip_x1`, `_clip_y0`, `_clip_y1`); it does
+not affect `pixel()`, `line()` or the sprite helpers.
 
 ### Text and sprites
 
@@ -134,10 +166,95 @@ All coordinates are clipped to the visible screen. `c` is the colour: non-zero d
 | `normalizeText(s)` | buffer address | Convert a UTF-8 byte string to CW Display F4 bytes in a static 256-byte buffer. |
 | `sprite(x, y, w, h, data)` | — | Draw a 1-bit-per-pixel bitmap; `data` is a `rom8` table (or table + offset). |
 
-CWiz names its glyph helper `glyph` because `char` is a reserved word (it is a type). Wiz names it
-`char`.  The CW Display helpers advance 11 px and draw a 13-row cell (12 px cap height plus one
-descender row); the font is rasterised at its native 1x size and is not scaled to 6x8.  The 2.4 KB
-table is included only when one of the `*_cw` functions is used.
+`glyph()` is the CWiz spelling of the upstream Wiz `char()` helper: `char` is a reserved word in C
+(it is a type), so CWiz cannot declare or call a function with that name.  The CW Display helpers
+advance 11 px and draw a 13-row cell (12 px cap height plus one descender row); the font is
+rasterised at its native 1x size and is not scaled to 6x8.  The 2.4 KB table is included only when
+one of the `*_cw` functions is used.
+
+### Scaled text
+
+The upstream PRELUDE also exposes scaled 6x8 text.  `h`/`w` are the glyph height/width in pixels;
+the 8x6 font is resampled to that cell size.
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `charz(x, y, c, h, w)` | — | Draw one scaled ASCII glyph (codes outside `32..126` become `?`). |
+| `textz(x, y, h, w, s)` | end `x` | Draw a NUL-terminated ROM string, advancing `w` per glyph. |
+| `numz(x, y, h, w, n)` | end `x` | Draw signed decimal `n` with the scaled font. |
+
+### Sprites and hex bitmaps
+
+| Call | Description |
+|------|-------------|
+| `sprite(x, y, w, h, data)` | Draw a 1-bit-per-pixel bitmap from a `rom8` table. |
+| `sprite_rot(x, y, w, h, data, sx=1, sy=1, rot=0)` | Same bitmap with a flip (`w`/`h` negative flips an axis) and rotation `rot = 0..3` in 90-degree steps. |
+| `draw(x, y, h, w, s)` | Decode a ROM8 string of hexadecimal nibble pairs into an `h` x `w` bitmap and draw it. |
+| `_hexv(c)` | Internal helper: ASCII hex digit to value `0..15`. |
+| `_sprite_px(...)` | Internal helper: pixel loop used by `sprite_rot`. |
+
+### Input and waitkey
+
+These read the keyboard and block until a key arrives; they are compile/link-tested rather than
+simulated because the simulator has no key-press events.
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `wait_key()` | key | Wait for all keys to be released, then for a press. |
+| `waitkey(ms)` | key or `-1` | Bounded wait (`ms` milliseconds) for a *new* key press; suppresses the key that was already held. |
+| `getc()` | char | Blocking character read (`wait_key()`). |
+| `getc_tap()` | char or control | T9 multi-tap decoder: `AC` -> `-32768`, `EXE` -> `-2`, `DEL` -> `-3`. |
+| `input_num(x, y, default)` | number | Editable numeric field; `AC` cancels, `EXE` commits. |
+| `input_tap(b, max, x, y)` | length or `-1` | Multi-tap text field into a RAM buffer. |
+| `input_pad(b, max, x, y)` | length or `-1` | On-screen keyboard field into a RAM buffer. |
+
+The T9/pad helpers use `_tap_char`, `_dig`/`_pdig`, `_wkl`, `_gc_pend`, `_pad_up` and the ROM8
+character table `_pad_cs`; these are internal and pulled in on demand.
+
+### Strings
+
+| Call | Description |
+|------|-------------|
+| `strlen(s)` / `strcmp(a, b)` | Length / lexicographic comparison of NUL-terminated strings. |
+| `strcpy(dst, src)` | Copy a ROM string into RAM. |
+| `atoi(s)` / `itoa(buf, n, base)` | Decimal string to integer / integer to string. |
+
+### Heap and RAM files
+
+Ported from the upstream PRELUDE over the runtime heap (`0xE818..0xEF00`, or `0xE820..0xEDE0` on
+cwapp).  A block header is a 16-bit little-endian word; its high bit marks a free block.
+
+| Call | Description |
+|------|-------------|
+| `_rdw(a)` / `_wrw(a, v)` | Read / write a 16-bit little-endian word at `a`. |
+| `alloc(n)` | Allocate `n` bytes (rounded up to an even size, plus a 2-byte header); returns the data address or `0`. |
+| `free(p)` | Release a block returned by `alloc()` and merge adjacent free blocks (`_merge`). |
+| `f_save(nm, buf, n)` | Save `n` bytes to a RAM file named by a NUL-terminated ROM string; returns `1`/`0`. |
+| `f_load(nm, buf, max)` | Load up to `max` bytes; returns the length, or `-1` when the file does not exist. |
+| `f_exists(nm)` / `f_remove(nm)` | Test / delete a RAM file. |
+
+### RTC and timers
+
+RTC registers are accessed with `peek`/`poke` at `0xF0C0..0xF0C7` (seconds, minutes, hours, day,
+weekday, month, year offset from 2026, enable).  `0xF0C3` is an immutable SFR address for
+allocation purposes, but the helpers read and write it like upstream.
+
+| Call | Description |
+|------|-------------|
+| `second()` / `minute()` / `hour()` | BCD-decoded clock fields. |
+| `day()` / `weekday()` / `month()` / `year()` | Date fields (`year()` adds 2026). |
+| `rtc_read()` | Double-buffered snapshot into `_rtc[7]`: retries until two consecutive reads agree. |
+| `rtc_alive()` | Returns `1` when the seconds register changes within 20 000 ticks. |
+| `rtc_enable()` / `rtc_disable()` / `rtc_reset()` | Control the RTC; `rtc_reset()` clears all registers. |
+| `set_time(h, m, s)` / `set_date(y, mo, d)` | Write the clock / calendar registers (BCD for time). |
+| `set_hours(h)` / `set_minutes(m)` / `set_seconds(s)` | Write one BCD clock field. |
+| `set_day(d)` / `set_month(mo)` / `set_year(y)` | Write one calendar field (`set_date()` also recomputes the weekday). |
+| `draw_time(x, y)` / `draw_date(x, y)` | Render the snapshot as `HH:MM:SS` / `DD/MM/YY`. |
+| `_dec(b)` / `_bcd(v)` / `_weekday(y, mo, d)` | Internal BCD and Zeller weekday helpers. |
+| `elapsed(t)` | `ticks() - t`; `ticks()` runs at 8 counts per millisecond. |
+
+`rtc_alive()` and `waitkey(ms)` need a running timer; in the deterministic simulator `ticks()` is
+static, so those two helpers are compile/link-tested only.
 
 ### `print`
 

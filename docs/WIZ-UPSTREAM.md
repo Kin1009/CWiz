@@ -74,15 +74,21 @@ a parallel C-syntax prelude.
 |---|---|---|---|
 | `abs`, `min`, `max`, `clamp`, `sign`, `rand`/`srand` | Ported | Ported | |
 | `wait_key`, `hline`, `vline`, `rect`, `fillrect`, `line`, `circle`, `disc` | Ported | Ported | CWiz adds clipping |
-| `font`, `char`, `text`, `num`, `sprite` | Ported | Ported (`glyph`/`glyph_cw`) | `char` is a keyword in C |
+| `font`, `char`, `text`, `num`, `sprite` | Ported | Ported (`glyph`/`glyph_cw`) | `glyph()` is the CWiz spelling of upstream `char()`; `char` is a keyword in C |
 | `normalizeText`, Vietnamese F4 glyphs | Extended | Extended | CW Display 11x13 font |
 | `strlen`, `strcmp`, `strcpy`, `atoi`, `itoa` | **Newly ported** | **Newly ported** | pure source, tested |
 | `getpixel`, `clear_rect`, `invert_rect`, `copy_rect` | Ported (prelude) | Ported (prelude) | replaces the native asm versions |
-| `ellipse`, `fillellipse`, `tri`, `filltri`, `roundrect` | Ported | **Missing** | Wiz prelude; CWiz has the string/rect subset |
-| `elapsed`, `rtc`, `set_time`, `set_date`, `_weekday`, `rtc_ctl`, `drawtime` | Ported | **Missing** | Wiz prelude over peek/poke RTC registers |
-| `getc`, `input_num`, `clip`, `sprite_rot`, `getc_tap`, `input_tap`, `input_pad` | Ported | **Missing** | Wiz prelude; `clip` drives the clip globals used by hline/vline |
-| `word`, `alloc`, `free`, `file` | Ported | **Missing** | Wiz prelude over the runtime heap (E818..EF00) |
-| `charz`, `textz`, `numz`, `draw` | Ported | **Missing** | Wiz prelude |
+| `ellipse`, `fillellipse`, `tri`, `filltri`, `roundrect` | Ported | **Ported** | `prelude_shapes.hpp`; all target screen pixels directly |
+| `elapsed`, `rtc`, `set_time`, `set_date`, `_weekday`, `rtc_ctl`, `drawtime` | Ported | **Ported** | `prelude_heap_rtc.hpp` over peek/poke RTC registers; CWiz names the display helpers `rtc_read`/`draw_time`/`draw_date` |
+| `getc`, `input_num`, `clip`, `sprite_rot`, `getc_tap`, `input_tap`, `input_pad` | Ported | **Ported** | `prelude_input.hpp` + `prelude_shapes.hpp`; `clip` drives the clip globals used by the clip-aware CWiz `hline`/`vline` |
+| `word`, `alloc`, `free`, `file` | Ported | **Ported** | `prelude_heap_rtc.hpp` over the runtime heap (E818..EF00); `_rdw`/`_wrw` are the word helpers |
+| `charz`, `textz`, `numz`, `draw` | Ported | **Ported** | `prelude_shapes.hpp`; `draw` decodes a ROM8 hex string |
+
+The CWiz port keeps upstream's `sprite_rot` helper under that name (the existing CWiz `sprite()`
+is not redefined) and adds the bounded `waitkey(ms)` alongside the blocking `wait_key()`/`getc()`.
+`rtc_alive()` and `waitkey(ms)` need a running timer, so they are compile/link-tested rather than
+simulated; all other ported helpers are exercised with deterministic simulator checks in
+`tests/test_prelude_ports.cpp`.
 
 ## 5. Runtime routines
 
@@ -159,31 +165,30 @@ No upstream opcode is missing.
 
 ## 10. Priority list for porting
 
-Ordered by value / risk.  "Low risk" means pure source over already-ported
-built-ins or a self-contained assembler routine.
+The high-value/high-risk items from the previous revision are now done:
 
-1. **`ticks()` / `delay_ms()`** — high value (timing, `elapsed`, input
-   timeouts).  Port `__tm0_start`, `__tm0_read`, `__ticks`, `__delay_ms` from
-   upstream, add both built-ins to Wiz/CWiz, test with the simulator's timer
-   model (or only the `n <= 0` path if the simulator has no TM0).
-2. **`wizimport.py` in C++** — high value for multi-file Wiz projects.  It is
-   a source-to-source pass with line preservation; failure modes are easy to
-   test with temporary files.
-3. **Pure-source graphics prelude** — `ellipse`, `fillellipse`, `tri`,
-   `filltri`, `roundrect`.  Low risk, no runtime changes.
-4. **`clip()` + clip-aware `hline`/`vline`** — medium risk: needs the four
-   runtime state bytes upstream reserves at 0xE801–0xE804 and `__rt_init`
-   initialisation.
-5. **`charz` / `textz` / `numz` / `draw`** — low risk once the string helpers
-   (now ported) exist.
-6. **RTC prelude** (`rtc`, `set_time`, `set_date`, `_weekday`, `rtc_ctl`,
-   `drawtime`, `elapsed`) — medium/high risk: hardware registers and
-   simulator support.
-7. **Heap / RAM file system** (`word`, `alloc`, `free`, `file`, `_hpeek`,
-   `_hpoke`) — high risk: needs a heap model, affects RAM limits.
-8. **Interactive input** (`getc`, `input_num`, `getc_tap`, `input_tap`,
-   `input_pad`, `sprite_rot`) — high risk: depends on clip, timing and heap
-   pieces above.
+1. ~~`ticks()` / `delay_ms()`~~ — ported as runtime built-ins; `elapsed()` is
+   the prelude wrapper.  The simulator's timer is static, so timer-dependent
+   helpers (`rtc_alive`, `waitkey`) are compile/link-tested only.
+2. ~~Pure-source graphics prelude~~ — `ellipse`, `fillellipse`, `tri`,
+   `filltri`, `roundrect`, `clip` and the clip-aware `hline`/`vline` are in
+   `prelude_shapes.hpp`.
+3. ~~Scaled text / hex bitmaps~~ — `charz`, `textz`, `numz`, `draw`, `sprite_rot`
+   and `_hexv` are in `prelude_shapes.hpp`.
+4. ~~RTC prelude~~ — all getters, setters, `rtc_read`/`rtc_alive`,
+   `draw_time`/`draw_date` and `_rtc[7]` are in `prelude_heap_rtc.hpp`.
+5. ~~Heap / RAM file system~~ — `_rdw`/`_wrw`, `alloc`/`free`/`_merge` and
+   `f_save`/`f_load`/`f_exists`/`f_remove` are in `prelude_heap_rtc.hpp`.
+6. ~~Interactive input~~ — `waitkey`, `getc`, `getc_tap`, `input_num`,
+   `input_tap` and `input_pad` are in `prelude_input.hpp`.
+
+Remaining work:
+
+1. **`wizimport.py` in C++** — still the main missing upstream feature
+   (multi-file Wiz projects).  A source-to-source pass with line preservation;
+   failure modes are easy to test with temporary files.
+2. **Hardware-timed behaviour in the simulator** — model TM0 so that
+   `rtc_alive()` and `waitkey(ms)` can be simulated rather than only compiled.
 
 Deliberately not ported: `#org` for non-ROP builds (the patch slot chooses the
 address), and upstream's native pixel/rect/string assembly (the source

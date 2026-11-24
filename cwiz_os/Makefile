@@ -147,12 +147,15 @@ LOOPS_IDIOMATIC := \
 # hub_1A9FC (8,866 vectors, 10,728 B) and all other flags stay excluded.
 FLAGS_IDIOMATIC := \
 	ui_block_17B80_caller_17B48.cwiz math_15374.cwiz math_15722.cwiz \
-	math_15730.cwiz ui_14258.cwiz
+	math_15730.cwiz
 #
 # After dedup the recovered blob is 26,328 B, so the idiomatic ceiling is
 # 61,824 - 26,328 = 35,496 B.  This cap stops 64 B short of it (35,432 B).
-# The selected 56 modules plus the boundary stub compile to 35,394 B, leaving
-# 102 B of the bank-3 gap free.  NOTE: the read-only gen_final_manifest.py
+# The selected 55 modules plus the boundary stub compile to about 35,076 B,
+# leaving about 420 B of the bank-3 gap free.  The lowest-evidence tier-B flag
+# (ui_14258, 6,571 vectors) was dropped after the Wiz PRELUDE port grew shared
+# helpers; the four 8,088-vector flags remain.  NOTE: the read-only
+# gen_final_manifest.py
 # still prints the old 30,920/30,984 numbers in its policy.fit string; the
 # authoritative sizes and per-module evidence are in blobs/counts/included.
 IDIOMATIC_SIZE_CAP := 35432

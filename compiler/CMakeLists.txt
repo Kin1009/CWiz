@@ -86,6 +86,7 @@ add_executable(wiztests
   ${WIZ_TESTS_DIR}/test_cwmode.cpp
   ${WIZ_TESTS_DIR}/test_cwlink.cpp
   ${WIZ_TESTS_DIR}/test_unsigned.cpp
+  ${WIZ_TESTS_DIR}/test_prelude_ports.cpp
 )
 target_include_directories(wiztests PRIVATE "${WIZ_TESTS_DIR}")
 target_link_libraries(wiztests PRIVATE wizcore)

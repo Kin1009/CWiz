@@ -14,6 +14,9 @@
 #include "font_cw.hpp"
 #include "font_cw_vn.hpp"
 #include "vn_f4.hpp"
+#include "prelude_shapes.hpp"
+#include "prelude_input.hpp"
+#include "prelude_heap_rtc.hpp"
 #include "build.hpp"
 #include "wiz.hpp"  // key_consts()
 
@@ -2446,16 +2449,16 @@ void srand(int s) { _seed = s; }
 int rand(int n) { _seed = _seed * 25173 + 13849; return ((_seed >> 1) & 0x7FFF) % n; }
 
 void hline(int x0, int x1, int y, int c = 1) {
-    if (y < 0 || y >= _ROWS) { return; }
-    if (x0 < 0) { x0 = 0; }
-    if (x1 > 192) { x1 = 192; }
+    if (y < _clip_y0 || y >= _clip_y1) { return; }
+    if (x0 < _clip_x0) { x0 = _clip_x0; }
+    if (x1 > _clip_x1) { x1 = _clip_x1; }
     if (x0 >= x1) { return; }
     _hspan(x0, x1, y, c != 0);
 }
 void vline(int x, int y0, int y1, int c = 1) {
-    if (x < 0 || x > 191) { return; }
-    if (y0 < 0) { y0 = 0; }
-    if (y1 > _ROWS) { y1 = _ROWS; }
+    if (x < _clip_x0 || x >= _clip_x1) { return; }
+    if (y0 < _clip_y0) { y0 = _clip_y0; }
+    if (y1 > _clip_y1) { y1 = _clip_y1; }
     int y = y0;
     while (y < y1) { pixel(x, y, c); y = y + 1; }
 }
@@ -2935,7 +2938,9 @@ void copy_rect(int x, int y, int w, int h, int x2, int y2) {
 
 static std::string prelude_source() {
     return font_table_source() + "\n" + cw_font_table_source() + "\n" +
-           cw_font_vn_table_source() + "\n" + vn_f4_table_source() + "\n" + PRELUDE_SRC;
+           cw_font_vn_table_source() + "\n" + vn_f4_table_source() + "\n" +
+           PRELUDE_SRC + "\n" + PRELUDE_SHAPES + "\n" + PRELUDE_INPUT + "\n" +
+           PRELUDE_HEAP_RTC;
 }
 
 static std::string decl_name(const NodeP& d) { return d->sval; }

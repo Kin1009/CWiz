@@ -207,5 +207,6 @@ void run_conformance();
 void run_cwmode();
 void run_cwlink();
 void run_unsigned();
+void run_prelude_ports();
 
 }  // namespace wt
