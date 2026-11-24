@@ -180,7 +180,7 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
 
     if (emit_rsc) {
         std::string rsc_error;
-        const std::string rsc = rop_source_to_rsc(text, model, lang, rsc_error);
+        const std::string rsc = rop_source_to_rsc(text, model, lang, rsc_error, target);
         if (rsc.empty()) {
             d.error(rsc_error.empty() ? "cannot emit RAC source" : rsc_error, src);
             return false;
@@ -203,7 +203,7 @@ static bool compile_rop_one(const std::string& src, const Cli& args, Diag& d,
 
     RacRopResult rac;
     try {
-        rac = build_rop_rac(text, model, lang, rsc_path, args.value("rac"));
+        rac = build_rop_rac(text, model, lang, rsc_path, args.value("rac"), target);
     } catch (const std::exception& e) {
         d.error(e.what(), src);
         return false;

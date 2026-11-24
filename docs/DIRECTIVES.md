@@ -53,7 +53,7 @@ system include path.
 | `#pragma once` | text | CWiz preprocessor | `once` is the supported pragma |
 | `#error text` | text | CWiz preprocessor | stops compilation |
 | `#include "file"` / `#include <stdint.h>` | string | CWiz preprocessor | project file relative to the including file; angle form only for built-in freestanding headers |
-| `#for TARGET[, TARGET]` | target list | CWiz preprocessor | canonical targets `580`, `880`; `all` in sections |
+| `#for TARGET[, TARGET]` | target list | CWiz preprocessor | canonical targets `580`, `880`, `cwapp`; `all` in sections |
 | `#cwapp` | none | CWiz preprocessor | legacy app form; must follow `#for 580` |
 | `#cwapp SLOT "TEXT" ICON SELECTED` | arguments | CWiz preprocessor | extra app form; see below |
 | `#slot N` | 1..12 | CWiz preprocessor | legacy form only, after `#cwapp`, at most once |
@@ -130,10 +130,13 @@ Rules:
   `char` array initialized from a string.  Existing F4 pairs are preserved.
 * RAM `[[at]]` pins a global/local variable or array.  The allocator skips
   pinned ranges, validates alignment, `var_base..var_limit`, reserved RAM and
-  overlap (`sema.attribute-at-*`).
+  overlap (`sema.attribute-at-*`).  For the `cwapp` target the window is
+  `0xE820..0xEE00` and the reserved spans are the 13-entry exclusion map in
+  [CWAPP.md](CWAPP.md#cwapp-ram-map-and-exclusions).
 * ROM `[[at]]` places the table with an assembler `ORG` at that address.  The
-  address must be inside the ROM window and must not overlap another pinned
-  table.  **Limitation:** the compiler does not know the final code extent
+  address must fit the 16-bit address space (`0x0000..0xFFFF`, table bytes
+  included) and must not overlap another pinned table; there is no target-specific
+  ROM-size cap.  **Limitation:** the compiler does not know the final code extent
   until assembly; a ROM address below the generated code is not rejected.
   Choose an address safely beyond the generated code (for example `0x3000`).
 * Unknown attributes (including namespaced ones) are accepted and ignored, as

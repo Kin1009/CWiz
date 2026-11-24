@@ -78,9 +78,10 @@ _save_fail:
     st r0, 0E5D4h
 _save_done:
     di
-    mov r0, #0
-    mov r1, #0F0h
+    mov r0, #0CEh
+    mov r1, #0DBh
     mov sp, er0
+    ; cwapp stack grows down inside the allowed gap 0xD16C-0xDBCF
     mov r0, #0
     st r0, 0F041H
     mov er0, #0
@@ -101,9 +102,10 @@ __cwapp_reset:
     mov r0, #0
     st r0, 0E7F4H
     di
-    mov r0, #0
-    mov r1, #0F0h
+    mov r0, #0CEh
+    mov r1, #0DBh
     mov sp, er0
+    ; cwapp stack grows down inside the allowed gap 0xD16C-0xDBCF
     ; reset key SFRs the firmware's reset handler expects at power-on state
     mov r0, #17h
     st r0, 0F028H        ; BLKCON0: re-enable peripheral clocks

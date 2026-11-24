@@ -1,6 +1,6 @@
 # .cwapplink: many cwapp apps in one fx-580VN X ROM
 
-Status: current (2026-11-07)
+Status: current (2026-11-24)
 
 A `.cwapplink` project compiles several cwapp sources into one 262144-byte
 fx-580VN X firmware image. Every app gets its own code block and its own mode
@@ -250,6 +250,82 @@ return from `main()` restore them byte for byte before the mode-menu return.
 - The state block is 162 bytes: count, used bytes, 8 four-byte descriptors and
   the 128-byte snapshot area.
 
+## cwapp RAM map and exclusions
+
+The cwapp target gives the app the calculator's CPU while the fx-580VN X
+firmware still owns key state, the screen buffers and the SFRs. The CWiz RAM
+allocator therefore works only inside `0xE820..0xEE00`
+(`TARGET_CWAPP.var_base`/`var_limit` in `compiler/src/targets.cpp`), and every
+byte it may not hand out is listed in that target's `reserved_ram`. All ranges
+below are **inclusive**. Crossing one of them corrupts firmware state, a
+shadow framebuffer or an SFR, so the compiler rejects `[[at]]` pins there and
+the verifier checks every linked allocation.
+
+### Exclusion table
+
+| Span | Bytes | Category | Reason |
+| --- | ---: | --- | --- |
+| `0xD000..0xD16B` | 364 | forbidden | Firmware key/input scratch and low system variables below the app stack; must stay intact for MENU and exit. |
+| `0xDBD0..0xDBDF` | 16 | forbidden | Reserved system span just above the app stack. |
+| `0xDBE0..0xDBE7` | 8 | forbidden | Serial-number span; `store_serial_number()` writes it deliberately with `poke()`. |
+| `0xDDD3..0xE5D2` | 2048 | forbidden | SB2 shadow screen buffer; the firmware repaint path depends on it. |
+| `0xEDE0..0xEFFF` | 544 | forbidden | Reserved span above globals and heap. |
+| `0xF000..0xF04F` | 80 | forbidden | SFR bank 0 (keyboard, LCD and timers). |
+| `0xF220..0xF224` | 5 | forbidden | Reserved SFR window. |
+| `0xF800..0xFFFF` | 2048 | forbidden | SB1 shadow screen buffer. |
+| `0xF0C3` | 1 | immutable | Firmware-owned address; never allocated. |
+| `0xF0D1` | 1 | immutable | Firmware-owned address; never allocated. |
+| `0xF310` | 1 | immutable | Firmware-owned address; never allocated. |
+| `0xF100..0xF21F` | 288 | guide-unmapped | Excluded conservatively: peek/poke there faults. |
+| `0xF311..0xF7FF` | 1263 | guide-unmapped | Excluded conservatively: peek/poke there faults. |
+
+The eight forbidden ranges and three immutable addresses come from the
+fx-580VN X firmware/OS contract; the two guide-unmapped spans are excluded
+conservatively because the hardware guide leaves them unmapped. The byte
+budget is exact and machine-checked:
+
+```
+5113 forbidden bytes + 3 immutable addresses + 7172 allowed bytes = 12288 bytes
+```
+
+`12288` is `0x3000`, the whole app-visible `0xD000..0xFFFF` window. The two
+guide-unmapped spans are counted as *allowed* in this budget — the hardware
+can address them, but the allocator still will not use them.
+
+### Allowed windows and placement
+
+| Use | Window | Notes |
+| --- | --- | --- |
+| App stack | `0xD16C..0xDBCF` | Grows down from base `0xDBCE` set in `_APP`; skips `DBD0..DBE7`. |
+| Globals | `0xE820..0xEDDF` | From `var_base` up to the `EDE0` forbidden span; `[[at]]` pins must land here. |
+| Dynamic heap | watermark..`0xEDE0` | Grows up to `__HEAP_HI = 0xEDE0`; never enters the forbidden span. |
+| Exit save area | `0xE5D3..0xE7FF` | Runtime stack snapshot, below the globals window. |
+
+The runtime template also touches SFRs at `0xF000..0xF04F` and the shadow
+buffers at `DDD3`/`F800` — those are intentional firmware accesses, not
+allocator placements. `poke()` constants such as the serial span are likewise
+hardware writes. The verifier checks only addresses the allocator assigned to
+data, stack and heap symbols.
+
+### Machine check
+
+`cwiz_os/tools/verify_cwapp_exclusions.py` reads a linked assembly listing (or
+the `.bin`'s companion `.asm`, or a symbol/address report) and fails with a
+nonzero status if any reference lands in one of the 13 exclusions. It also
+asserts the byte-budget invariant above on every run.
+
+```console
+$ python3 cwiz_os/tools/verify_cwapp_exclusions.py build/app.asm
+cwapp RAM exclusion verification OK: ... 0 forbidden, 0 immutable, 0 guide-unmapped hits
+$ python3 cwiz_os/tools/verify_ram_layout.py --target cwapp \
+      --source cwiz_os/main.cwiz --compiler build/wizc
+RAM layout OK (cwapp): ... no reserved-span overlap
+```
+
+The same 13-entry table is used by `verify_ram_layout.py --target cwapp`, so
+the two tools cannot drift apart. A concise, machine-checkable copy lives in
+[cwizapp-ram-exclusions.md](../cwiz_os/docs/cwizapp-ram-exclusions.md).
+
 ## fx-880BTG
 
 The fx-880BTG mode table stores one 64x16 two-plane icon and rendered 64x13
@@ -335,7 +411,7 @@ without a reset or a splash.
 
 - MENU is checked inside `key()`, `key_down()` and `key_hit()`. An app that
   never polls a key function cannot see it.
-- Plain AC is not intercepted: `key()` reports `K_AC` (29) and the app decides
+- Plain AC is not intercepted: `key()` reports `K_AC` (34) and the app decides
   what to do with it.
 - OFF is Shift+AC. The runtime follows the stock power-off path: LCD off, FCON
   cleared, interrupts masked, STOPACP programmed and STOP entered. ON then
@@ -361,7 +437,8 @@ calculator back to the firmware menu:
    firmware stack, records the stack pointer at `0xE5D3`, and copies the live
    firmware stack window into `0xE5D5` onwards. The snapshot area ends at
    `0xE7FF`, below the runtime heap at `0xE820`. The app then switches `SP` to
-   `0xF000` and runs normally.
+   `0xDBCE`, so the stack grows down inside the allowed app-stack gap
+   `0xD16C..0xDBCF`, and runs normally.
 2. **Exit.** `exit()`, a MENU key read, or returning from `main()` reaches the
    generated `__cwapp_return` epilogue. It copies the saved stack back, restores
    `SP`, `ER14` through `ER0`, `PSW` and `LR`, so the CPU is exactly where the

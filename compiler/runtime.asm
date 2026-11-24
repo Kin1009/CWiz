@@ -110,6 +110,47 @@ __sra16_l:
 __sra16_e:
     RT
 
+; unsigned ER0 / ER2 -> ER0 quotient, ER2 remainder.
+; CWiz extension: same restoring-division core as __div16, without the sign
+; prologue/epilogue.  BLT is the carry (unsigned) branch, valid for bit 15 set.
+__udiv16:
+    MOV R6, R2
+    OR  R6, R3
+    BNE __udiv16_ok
+    MOV ER0, #0
+    MOV ER2, #0
+    RT
+__udiv16_ok:
+    MOV ER4, #0
+    MOV R6, #16
+__udiv16_l:
+    ADD ER0, ER0
+    ADDC R4, R4
+    ADDC R5, R5
+    CMP R4, R2
+    CMPC R5, R3
+    BLT __udiv16_n
+    SUB R4, R2
+    SUBC R5, R3
+    OR  R0, #1
+__udiv16_n:
+    ADD R6, #-1
+    BNE __udiv16_l
+    MOV ER2, ER4
+    RT
+
+; ER0 >> R2 (logical, zero-fill) -- CWiz extension for unsigned >>
+__shr16:
+    CMP R2, #0
+    BEQ __shr16_e
+__shr16_l:
+    SRLC R0, #1
+    SRL  R1, #1
+    ADD R2, #-1
+    BNE __shr16_l
+__shr16_e:
+    RT
+
 ; pixel(x=ER0, y=ER2, c=R4) : c=0 clears, nonzero sets. Off-screen coordinates are ignored.
 ; Draws into the shadow buffer SB2; call render() to make it visible.
 __pixel:
@@ -258,20 +299,22 @@ __rt_init:
     ST R0, 0E80EH
     ST R0, 0E80FH
     ST R0, 0E805H           ; ticks(): first-call arming flag
-    ; dynamic heap: one free block E820..EF00, file list head 0
-    MOV R0, #20H
+    ; dynamic heap: one free block __HEAP_LO..__HEAP_HI, file list head 0.
+    ; __HEAP_LO is the compiler allocator watermark (cwapp) or 0xE820;
+    ; __HEAP_HI is 0xEDE0 on cwapp (EDE0-EFFF is reserved) and 0xEF00 elsewhere.
+    MOV R0, #(__HEAP_LO & 0FFH)
     ST R0, 0E818H
-    MOV R0, #0E8H
+    MOV R0, #((__HEAP_LO >> 8) & 0FFH)
     ST R0, 0E819H
-    MOV R0, #0
+    MOV R0, #(__HEAP_HI & 0FFH)
     ST R0, 0E81AH
-    MOV R0, #0EFH
+    MOV R0, #((__HEAP_HI >> 8) & 0FFH)
     ST R0, 0E81BH
     ST R0, 0E81CH
     ST R0, 0E81DH
-    MOV R0, #0E0H
+    MOV R0, #((__HEAP_HI - __HEAP_LO) & 0FFH)
     ST R0, 0E820H
-    MOV R0, #86H
+    MOV R0, #(((__HEAP_HI - __HEAP_LO) >> 8) | 80H)
     ST R0, 0E821H
     RT
 
@@ -296,9 +339,9 @@ __cwapp_menu_ok1:            ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok1      ;@cwapp
-    MOV R2, #10H               ;@cwapp
+    MOV R2, #8                 ;@cwapp
     ST R2, 0F046H              ;@cwapp
-    MOV R3, #4                 ;@cwapp
+    MOV R3, #20H               ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok1      ;@cwapp
@@ -346,9 +389,9 @@ __cwapp_menu_ok2:            ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok2      ;@cwapp
-    MOV R2, #10H               ;@cwapp
+    MOV R2, #8                 ;@cwapp
     ST R2, 0F046H              ;@cwapp
-    MOV R3, #4                 ;@cwapp
+    MOV R3, #20H               ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok2      ;@cwapp
@@ -409,9 +452,9 @@ __cwapp_menu_ok3:            ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok3      ;@cwapp
-    MOV R2, #10H               ;@cwapp
+    MOV R2, #8                 ;@cwapp
     ST R2, 0F046H              ;@cwapp
-    MOV R3, #4                 ;@cwapp
+    MOV R3, #20H               ;@cwapp
     L R4, 0F040H               ;@cwapp
     AND R4, R3                 ;@cwapp
     BNE __cwapp_off_ok3      ;@cwapp

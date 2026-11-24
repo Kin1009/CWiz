@@ -319,14 +319,14 @@ void wt::run_cw() {
         int key_count = 0;
         for (const auto& kv : cwkeys)
             if (kv.first.rfind("K_", 0) == 0 && kv.first != "K_NONE") key_count++;
-        bool uniq = key_count == 49;
+        bool uniq = key_count == 48;
         std::set<int> seen;
         for (auto& kv : cwkeys) {
             if (kv.first.rfind("K_", 0) != 0 || kv.first == "K_NONE") continue;
             if (!(kv.second >= 0 && kv.second < 64)) uniq = false;
             if (!seen.insert(kv.second).second) uniq = false;
         }
-        check("cw key table: 49 keys, all scan codes unique and 0..63", uniq);
+        check("cw key table: 48 keys, all scan codes unique and 0..63", uniq);
     }
 
     // ------------------------------------------------- command line

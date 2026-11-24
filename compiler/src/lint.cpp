@@ -19,6 +19,18 @@
 namespace wiz {
 namespace {
 
+// Forward declarations: the declaration scanner (below) reports the CWiz
+// signedness-qualifier conflict rule through the shared `add()` helper.
+void add(std::vector<LintDiagnostic>&, LintSeverity, int, int, int, const std::string&,
+         const std::string&, const std::string&, const std::string&);
+LintSeverity severity_of(const std::string& rule);
+
+// CWiz extension: the compiler stores canonical internal type strings "uint"
+// and "uchar" for `unsigned int` / `unsigned char` (cwiz.cpp's
+// is_unsigned_type()).  The linter mirrors that two-string check locally so no
+// compiler header or Diag signature has to change for an advisory rule.
+bool is_unsigned_canon(const std::string& t) { return t == "uint" || t == "uchar"; }
+
 struct Line {
     std::string text;
     std::string code;     // text with comments and literals blanked
@@ -203,12 +215,15 @@ struct NewDecl {
     std::string name;
     int col = 0;         // 0-based
     int array_size = -1;
+    std::string type;    // CWiz: canonical "int"/"uint"/"char"/"uchar"
 };
 
 // Parse the declaration(s) on one code line.  Returns an empty list for
 // function definitions/prototypes, control statements and plain assignments to
 // an existing Wiz name (the caller de-duplicates those).
-std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
+std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz,
+                                          std::vector<LintDiagnostic>* diags = nullptr,
+                                          int line_no = 0) {
     const std::string& code = line.code;
     size_t n = code.size();
     size_t i = 0;
@@ -238,7 +253,7 @@ std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
                 std::string var = read_ident(q);
                 skip_ws(q);
                 if (!var.empty() && read_ident(q) == "in")
-                    return {{var, (int)var_at, -1}};
+                    return {{var, (int)var_at, -1, ""}};
             }
             return {};
         }
@@ -248,14 +263,14 @@ std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
             skip_ws(q);
             std::string name = read_ident(q);
             return name.empty() ? std::vector<NewDecl>{}
-                                : std::vector<NewDecl>{{name, (int)(q - name.size()), -1}};
+                                : std::vector<NewDecl>{{name, (int)(q - name.size()), -1, ""}};
         }
         if (first == "rom" || first == "rom8") {
             size_t q = p;
             skip_ws(q);
             std::string name = read_ident(q);
             return name.empty() ? std::vector<NewDecl>{}
-                                : std::vector<NewDecl>{{name, (int)(q - name.size()), -1}};
+                                : std::vector<NewDecl>{{name, (int)(q - name.size()), -1, ""}};
         }
         // NAME = value / NAME[index] = value; ignore comparisons and compound
         // assignment operators.
@@ -271,28 +286,43 @@ std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
             skip_ws(q);
         }
         if (q < n && code[q] == '=' && (q + 1 >= n || code[q + 1] != '='))
-            return {{first, (int)(i), -1}};
+            return {{first, (int)(i), -1, ""}};
         return {};
     }
 
     // CWiz: [qualifiers] base-type [base-type] [*] declarator [, declarator]...
     size_t p = i;
     bool saw_base = false;
+    std::string canon = "int";
+    int unsigned_count = 0, signed_count = 0;
     while (p < n) {
         std::string word = read_ident(p);
         if (word.empty()) break;
+        if (word == "unsigned" || word == "signed") {
+            // CWiz extension: remember signedness in the canonical internal
+            // spelling instead of dropping the qualifier.  `unsigned x` (no
+            // explicit `int`) is valid C and still declares a base type.
+            saw_base = true;
+            if (word == "unsigned") { ++unsigned_count; canon = "uint"; }
+            else { ++signed_count; canon = "int"; }
+            skip_ws(p);
+            continue;
+        }
         if (qualifiers().count(word)) {
             skip_ws(p);
             continue;
         }
         if (base_types().count(word)) {
             saw_base = true;
+            if (word == "char") canon = (canon == "uint") ? "uchar" : "char";
+            else if (word == "int" && !is_unsigned_canon(canon)) canon = "int";
             size_t save = p;
             skip_ws(p);
             std::string next = read_ident(p);
             if ((word == "rom" || word == "rom8") &&
                 (next == "int" || next == "char")) {
                 // `rom int table[...]`: the second word is the element type.
+                if (next == "char" && is_unsigned_canon(canon)) canon = "uchar";
                 continue;
             }
             p = save;
@@ -300,6 +330,12 @@ std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
         }
         break;
     }
+    if (diags && (unsigned_count > 1 || (unsigned_count && signed_count)))
+        add(*diags, severity_of("type/unsigned-qualifier-conflict"), line_no, (int)i + 1,
+            (int)i + 1 + std::max(unsigned_count, signed_count),
+            "type/unsigned-qualifier-conflict",
+            "conflicting or duplicated signedness qualifier",
+            "keep exactly one of `signed` or `unsigned`", "type.qualifier-conflict");
     if (!saw_base) return {};
 
     std::vector<NewDecl> out;
@@ -332,7 +368,7 @@ std::vector<NewDecl> declarations_on_line(const Line& line, bool cwiz) {
 
         // A '(' after the name means this is a function declaration.
         if (p < n && code[p] == '(') return {};
-        out.push_back({name, (int)name_at, size});
+        out.push_back({name, (int)name_at, size, canon});
 
         // Skip an initializer up to the next top-level comma.
         if (p < n && code[p] == '=') {
@@ -357,6 +393,7 @@ struct ParamInfo {
     std::string name;
     int line = 0;
     int col = 0;
+    std::string type;  // CWiz: canonical type (int/uint/char/uchar)
 };
 
 struct FunctionInfo {
@@ -379,16 +416,20 @@ void parse_params(const std::string& text, int line, int base_col, std::vector<P
         if (eq != std::string::npos) part = trim(part.substr(0, eq));
         // Remove array suffix and pointer stars, then take the last identifier.
         std::string name;
+        std::string canon = "int";
         size_t i = 0;
         while (i < part.size()) {
             if (!ident_start(part[i])) { ++i; continue; }
             size_t s = i;
             while (i < part.size() && ident_char(part[i])) ++i;
             std::string word = part.substr(s, i - s);
+            if (word == "unsigned") { canon = "uint"; continue; }
+            if (word == "signed") { canon = "int"; continue; }
+            if (word == "char") { canon = (canon == "uint") ? "uchar" : "char"; continue; }
             if (!base_types().count(word) && !qualifiers().count(word)) name = word;
         }
         if (!name.empty())
-            out.push_back({name, line, base_col + (int)raw.find(name) + 1});
+            out.push_back({name, line, base_col + (int)raw.find(name) + 1, canon});
     }
 }
 
@@ -527,7 +568,8 @@ std::vector<FunctionInfo> collect_functions(const std::vector<Line>& lines, bool
 
 // ---------------------------------------------------------------- helpers
 void add(std::vector<LintDiagnostic>& out, LintSeverity sev, int line, int col, int end_col,
-         const std::string& rule, const std::string& message, const std::string& hint = "") {
+         const std::string& rule, const std::string& message, const std::string& hint = "",
+         const std::string& code = "") {
     LintDiagnostic d;
     d.severity = sev;
     d.line = line;
@@ -536,6 +578,7 @@ void add(std::vector<LintDiagnostic>& out, LintSeverity sev, int line, int col, 
     d.rule = rule;
     d.message = message;
     d.hint = hint;
+    d.code = code;  // CWiz unsigned rules use lint.hpp's existing `code` field.
     out.push_back(std::move(d));
 }
 
@@ -550,6 +593,14 @@ LintSeverity severity_of(const std::string& rule) {
         {"readability/empty-block", LintSeverity::Note},
         {"readability/redundant-boolean", LintSeverity::Note},
         {"correctness/constant-condition", LintSeverity::Note},
+        // B-Unsigned (CWiz extension) — advisory only; the compiler owns errors.
+        {"type/unsigned-negative-initializer", LintSeverity::Warning},
+        {"type/unsigned-compare-zero", LintSeverity::Warning},
+        {"type/unsigned-unary-minus", LintSeverity::Warning},
+        {"type/signed-unsigned-mix", LintSeverity::Warning},
+        {"type/unsigned-qualifier-conflict", LintSeverity::Warning},
+        {"type/unsigned-literal-implicit", LintSeverity::Note},
+        {"type/unsigned-right-shift", LintSeverity::Note},
     };
     auto it = sev.find(rule);
     return it == sev.end() ? LintSeverity::Warning : it->second;
@@ -621,6 +672,13 @@ const std::vector<LintRuleInfo>& lint_rules() {
         {"style/trailing-whitespace", "line ends with spaces or tabs"},
         {"style/tabs", "indentation uses a tab"},
         {"style/todo", "TODO/FIXME/XXX marker"},
+        {"type/unsigned-negative-initializer", "negative constant initializes an unsigned 16-bit value"},
+        {"type/unsigned-compare-zero", "comparison with 0/negative is always true or false for unsigned"},
+        {"type/unsigned-unary-minus", "unary minus on unsigned wraps modulo 65536"},
+        {"type/signed-unsigned-mix", "implicit signed/unsigned conversion in a comparison or expression"},
+        {"type/unsigned-qualifier-conflict", "conflicting or duplicated signed/unsigned qualifiers"},
+        {"type/unsigned-literal-implicit", "unsuffixed literal >= 32768 is unsigned and forces unsigned arithmetic"},
+        {"type/unsigned-right-shift", "right shift of unsigned is logical (zero-fill), not arithmetic"},
     };
     return rules;
 }
@@ -876,19 +934,24 @@ std::vector<LintDiagnostic> lint_source(const std::string& source,
         int col;
         int indent;
         bool global;
+        std::string type;
     };
     std::vector<Decl> decls;
     std::map<std::string, int> global_line;
     std::map<std::string, int> array_size;
+    // CWiz extension: signedness of known names, used by the advisory type/* rules.
+    std::map<std::string, bool> unsigned_var;
+    std::map<std::string, bool> signed_var;
     std::map<std::string, std::set<int>> array_decl_lines;
     int brace_depth = 0;
     for (size_t i = 0; i < lines.size(); ++i) {
         if (lines[i].blank || lines[i].directive) continue;
         const int line_depth = brace_depth;
-        const std::vector<NewDecl> names = declarations_on_line(lines[i], cwiz);
+        const std::vector<NewDecl> names = declarations_on_line(lines[i], cwiz, &out, (int)i + 1);
         const bool global = cwiz ? line_depth == 0 : lines[i].indent == 0;
         for (const NewDecl& item : names) {
-            decls.push_back({item.name, (int)i + 1, item.col, lines[i].indent, global});
+            decls.push_back({item.name, (int)i + 1, item.col, lines[i].indent, global,
+                             item.type});
             if (global && !global_line.count(item.name)) global_line[item.name] = (int)i + 1;
             if (item.array_size >= 0) {
                 array_size[item.name] = item.array_size;
@@ -920,6 +983,14 @@ std::vector<LintDiagnostic> lint_source(const std::string& source,
     }
     decls.swap(unique);
 
+    if (cwiz) {
+        for (const Decl& d : decls) {
+            if (d.name.empty()) continue;
+            if (is_unsigned_canon(d.type)) unsigned_var[d.name] = true;
+            else signed_var[d.name] = true;
+        }
+    }
+
     for (const Decl& d : decls) {
         if (d.name.empty() || d.name[0] == '_') continue;
         if (!d.global && global_line.count(d.name) && global_line[d.name] != d.line) {
@@ -947,7 +1018,12 @@ std::vector<LintDiagnostic> lint_source(const std::string& source,
     const std::vector<FunctionInfo> functions = collect_functions(lines, cwiz);
     for (const FunctionInfo& fn : functions) {
         for (const ParamInfo& p : fn.params) {
-            if (p.name.empty() || p.name[0] == '_') continue;
+            if (p.name.empty()) continue;
+            if (cwiz) {
+                if (is_unsigned_canon(p.type)) unsigned_var[p.name] = true;
+                else signed_var[p.name] = true;
+            }
+            if (p.name[0] == '_') continue;
             if (count_word(lines, p.name) <= 1) {
                 add(out, severity_of("readability/unused-parameter"), p.line, p.col,
                     p.col + (int)p.name.size(), "readability/unused-parameter",
@@ -1044,6 +1120,144 @@ std::vector<LintDiagnostic> lint_source(const std::string& source,
                     "correctness/division-by-zero",
                     "division by zero in a constant expression",
                     "check the divisor; guard the operation when it can be zero");
+            }
+        }
+
+        // ---------------------------------------------------- unsigned (CWiz only)
+        // All rules below are advisory (Warning/Note).  Genuine type errors are
+        // emitted by the compiler and reach `wizlint` as rule "compile".
+        if (cwiz) {
+            // A negative constant stored in an unsigned object wraps mod 65536.
+            {
+                static const std::regex re(
+                    "\\bunsigned(?:\\s+int)?\\s+([A-Za-z_]\\w*)\\s*=\\s*-\\s*[0-9]");
+                std::smatch m;
+                if (std::regex_search(code, m, re))
+                    add(out, severity_of("type/unsigned-negative-initializer"), line,
+                        (int)m.position(0) + 1, (int)m.position(0) + (int)m[0].str().size() + 1,
+                        "type/unsigned-negative-initializer",
+                        "negative value wraps to 0..65535 in unsigned",
+                        "use a positive value or declare `int`", "type.negative-to-unsigned");
+            }
+
+            // Comparisons of an unsigned name with 0 / a negative constant.
+            for (const auto& uv : unsigned_var) {
+                const std::string& u = uv.first;
+                static const std::vector<std::string> suffixes = {
+                    "\\s*<\\s*0", "\\s*>=\\s*0",
+                    "\\s*<=\\s*-\\s*[0-9]", "\\s*>(?!=)\\s*-\\s*[0-9]"};
+                for (const std::string& suffix : suffixes) {
+                    std::regex re("\\b" + u + suffix);
+                    std::smatch m;
+                    if (!std::regex_search(code, m, re)) continue;
+                    const bool always_false =
+                        suffix.find("<\\s*0") != std::string::npos ||
+                        suffix.find("(?!=)") != std::string::npos;
+                    add(out, severity_of("type/unsigned-compare-zero"), line,
+                        (int)m.position(0) + 1, (int)m.position(0) + (int)m[0].str().size() + 1,
+                        "type/unsigned-compare-zero",
+                        "comparison of unsigned '" + u + "' with 0/negative is always true or false",
+                        "remove the test or compare against a real bound",
+                        always_false ? "type.comparison-always-false"
+                                     : "type.comparison-always-true");
+                    break;
+                }
+            }
+
+            // Unary minus on an unsigned name wraps modulo 65536.
+            for (const auto& uv : unsigned_var) {
+                // No leading \\b: '-' is not a word character, so a boundary
+                // before it would never match after whitespace or '('.
+                std::regex re("-\\s*" + uv.first + "\\b");
+                for (std::sregex_iterator it(code.begin(), code.end(), re), end; it != end; ++it) {
+                    size_t at = (size_t)it->position(0);
+                    if (at > 0 && (ident_char(code[at - 1]) || code[at - 1] == ')' ||
+                                   code[at - 1] == ']'))
+                        continue;  // binary minus, not a unary negation
+                    add(out, severity_of("type/unsigned-unary-minus"), line, (int)at + 1,
+                        (int)at + (int)it->str().size() + 1, "type/unsigned-unary-minus",
+                        "unary minus on unsigned '" + uv.first + "' wraps modulo 65536",
+                        "use `0x10000 - value` intentionally, or declare `int`",
+                        "type.unary-minus");
+                    break;
+                }
+            }
+
+            // Implicit mixed signed/unsigned operand: unsigned wins.
+            if (!signed_var.empty() && !unsigned_var.empty()) {
+                auto alternation = [](const std::map<std::string, bool>& m) {
+                    std::string s;
+                    for (const auto& kv : m) {
+                        if (!s.empty()) s += "|";
+                        s += kv.first;
+                    }
+                    return s;
+                };
+                std::regex re("\\b((" + alternation(signed_var) + ")|(" +
+                              alternation(unsigned_var) + "))\\s*(<=|>=|==|!=|<|>|\\+|-|\\*|/|%)"
+                              "\\s*((" + alternation(unsigned_var) + ")|(" +
+                              alternation(signed_var) + "))\\b");
+                std::smatch m;
+                if (std::regex_search(code, m, re)) {
+                    const bool left_u = !m[3].str().empty();
+                    const bool right_u = !m[6].str().empty();
+                    if (left_u != right_u)
+                        add(out, severity_of("type/signed-unsigned-mix"), line,
+                            (int)m.position(0) + 1, (int)m.position(0) + (int)m[0].str().size() + 1,
+                            "type/signed-unsigned-mix",
+                            "implicit signed/unsigned conversion — unsigned wins (usual C conversions)",
+                            "cast explicitly so the intended 16-bit result is visible",
+                            "type.signed-unsigned-mix");
+                }
+            }
+
+            // Unsuffixed 32768..65535 is unsigned; a u/U suffix is explicit.
+            // `code` has comments and strings blanked by split_lines(), so this
+            // only sees real source literals.  Values > 0xFFFF are a compiler
+            // error (`lex.literal-out-of-range`) and are skipped here.
+            if (!compile_error_lines.count(line) && !signed_var.empty()) {
+                static const std::regex num_re(
+                    "\\b(0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)([uUlL]*)\\b");
+                for (std::sregex_iterator it(code.begin(), code.end(), num_re), end; it != end; ++it) {
+                    const std::string digits = (*it)[1].str();
+                    const std::string suffix = (*it)[2].str();
+                    if (suffix.find_first_of("uU") != std::string::npos) continue;
+                    long long value = 0;
+                    if (digits.size() > 2 && digits[0] == '0' &&
+                        (digits[1] == 'x' || digits[1] == 'X'))
+                        value = std::strtoll(digits.c_str() + 2, nullptr, 16);
+                    else if (digits.size() > 2 && digits[0] == '0' &&
+                             (digits[1] == 'b' || digits[1] == 'B'))
+                        value = std::strtoll(digits.c_str() + 2, nullptr, 2);
+                    else
+                        value = std::strtoll(digits.c_str(), nullptr, 10);
+                    if (value < 32768 || value > 65535) continue;
+                    bool has_signed = false;
+                    for (const auto& sv : signed_var)
+                        if (code.find(sv.first) != std::string::npos) { has_signed = true; break; }
+                    if (!has_signed) continue;
+                    add(out, severity_of("type/unsigned-literal-implicit"), line,
+                        (int)it->position(0) + 1,
+                        (int)it->position(0) + (int)it->str().size() + 1,
+                        "type/unsigned-literal-implicit",
+                        "unsuffixed literal >= 32768 is unsigned; unsigned wins in this expression",
+                        "write an explicit `u` suffix or cast to make the 16-bit result visible",
+                        "type.signed-unsigned-mix");
+                    break;
+                }
+            }
+
+            // Right shift of an unsigned value is logical (zero-fill).
+            for (const auto& uv : unsigned_var) {
+                std::regex re("\\b" + uv.first + "\\s*>>");
+                std::smatch m;
+                if (!std::regex_search(code, m, re)) continue;
+                add(out, severity_of("type/unsigned-right-shift"), line,
+                    (int)m.position(0) + 1, (int)m.position(0) + (int)m[0].str().size() + 1,
+                    "type/unsigned-right-shift",
+                    "right shift of unsigned '" + uv.first + "' is logical (zero-fill)",
+                    "no sign extension; use `int` if you need an arithmetic shift",
+                    "type.logical-shift");
             }
         }
 

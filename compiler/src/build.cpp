@@ -335,9 +335,17 @@ static void validate_preserve_ranges(const std::vector<PreserveRange>& ranges,
 static BuildResult finish(const std::string& body, const std::map<std::string, int>& variables,
                           const Target& tg, uint32_t org = 0, bool extra_app = false,
                           const std::vector<PreserveRange>& preserve = {},
-                          bool preserve_used = false) {
+                          bool preserve_used = false, int heap_lo = 0) {
     validate_preserve_ranges(preserve, tg);
-    std::string full = make_boot(tg, org) + body;
+    // The runtime heap starts after the compiler's last RAM allocation.  On
+    // cwapp it must stop at 0xEDE0; EDE0-EFFF is firmware-reserved RAM.
+    int lo = heap_lo < 0xE820 ? 0xE820 : heap_lo;
+    int hi = tg.name == "cwapp" ? 0xEDE0 : 0xEF00;
+    if (lo >= hi)
+        throw CompileError("no RAM left for the heap", 0, 0,
+                           "reduce global/array usage", "memory.out-of-ram");
+    std::string full = fmt("__HEAP_LO EQU 0x%04X\n__HEAP_HI EQU 0x%04X\n", lo, hi) +
+                       make_boot(tg, org) + body;
     if (tg.name == "cwapp") {
         full += "__cwapp_preserve_init:\n";
         full += "    push lr\n";
@@ -464,7 +472,8 @@ BuildResult build_source(const std::string& src, const std::string& target,
     const bool preserve_used =
         tg.name == "cwapp" && (selected.find("preserve(") != std::string::npos ||
                                selected.find("restore_preserved(") != std::string::npos);
-    BuildResult res = finish(r.asm_body, r.variables, tg, org, false, {}, preserve_used);
+    BuildResult res = finish(r.asm_body, r.variables, tg, org, false, {}, preserve_used,
+                             r.heap_lo);
     res.cwapp = tg.name == "cwapp";
     return res;
 }
@@ -516,7 +525,7 @@ BuildResult build_cwiz(const std::string& src, const std::string& target,
         !pp.preserve.empty() || pp.text.find("preserve(") != std::string::npos ||
         pp.text.find("restore_preserved(") != std::string::npos;
     BuildResult res = finish(r.asm_body, vars, tg, org, pp.cwapp_extra, pp.preserve,
-                             preserve_used);
+                             preserve_used, r.heap_lo);
     res.cwapp = tg.name == "cwapp";
     res.slot = pp.slot;
     res.cwapp_extra = pp.cwapp_extra;

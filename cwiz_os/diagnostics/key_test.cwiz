@@ -13,7 +13,6 @@ void draw_key_label(int index) {
     if (index == 11) { print(0, 24, "PRESS: FRAC"); return; }
     if (index == 12) { print(0, 24, "PRESS: SQRT"); return; }
     if (index == 13) { print(0, 24, "PRESS: SQUARED"); return; }
-    if (index == 14) { print(0, 24, "PRESS: POWER"); return; }
     if (index == 15) { print(0, 24, "PRESS: LOG"); return; }
     if (index == 16) { print(0, 24, "PRESS: LN"); return; }
     if (index == 17) { print(0, 24, "PRESS: NEG"); return; }
@@ -79,7 +78,6 @@ void run_key_tests() {
     test_one_key(K_FRAC, 11);
     test_one_key(K_SQRT, 12);
     test_one_key(K_SQUARED, 13);
-    test_one_key(K_POWER, 14);
     test_one_key(K_LOG, 15);
     test_one_key(K_LN, 16);
     test_one_key(K_NEG, 17);

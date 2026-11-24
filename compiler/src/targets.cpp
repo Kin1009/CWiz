@@ -7,16 +7,36 @@
 namespace wiz {
 
 // var_limit stops the allocator before SB2 (the shadow screen buffer):
-//   cw / cwapp: SB2 = 0xDDD3-0xE5D2, stack starts at 0xE5D3
-//   cwii:       SB2 = 0xCA54-0xE253, stack starts at 0xE254
+//   cw:   SB2 = 0xDDD3-0xE5D2, stack starts at 0xE5D3
+//   cwii: SB2 = 0xCA54-0xE253, stack starts at 0xE254
+//   cwapp: globals 0xE820..0xEDDF, dynamic heap up to 0xEDE0,
+//          app stack grows down inside 0xD16C..0xDBCF. See docs/CWAPP.md.
 const Target TARGET_CWII{"cwii", "ML620909", "template_ML620909.asm", 0x9000, 0x9000,
                          0x9000, 0xCA54, 2, 0, 64, "nX-U8/100", 0, {}};
 const Target TARGET_CW{"cw", "ML620906", "template_ML620906.asm", 0xD000, 0xD000, 0xD000,
                        0xDDD3, 1, 0, 63, "nX-U16/100", 1,
                        {{0xD16C, 0xD175}, {0xD180, 0xD247}, {0xD31A, 0xD391},
                         {0xD392, 0xD521}, {0xD522, 0xD5E9}, {0xD784, 0xD913}}};
-const Target TARGET_CWAPP{"cwapp", "ML620906", "template_cwapp.asm", 0xD000, 0xD000, 0xD000,
-                          0xDDD3, 1, 3, 63, "nX-U16/100", 1, {}};
+// cwapp RAM exclusion map (inclusive).  The eight forbidden ranges and the three
+// immutable single addresses come from the fx-580VN X firmware/OS contract; the
+// two guide-unmapped spans are excluded conservatively (peek/poke there faults).
+// Globals start at 0xE820 and stop before 0xEDE0; the app stack uses 0xD16C-0xDBCF.
+const Target TARGET_CWAPP{
+    "cwapp", "ML620906", "template_cwapp.asm", 0xD000, 0xD000, 0xE820,
+    0xEE00, 1, 3, 63, "nX-U16/100", 1,
+    {{0xD000, 0xD16B}, {0xDBD0, 0xDBDF}, {0xDBE0, 0xDBE7}, {0xDDD3, 0xE5D2},
+     {0xEDE0, 0xEFFF}, {0xF000, 0xF04F}, {0xF220, 0xF224}, {0xF800, 0xFFFF},
+     {0xF0C3, 0xF0C3}, {0xF0D1, 0xF0D1}, {0xF310, 0xF310},
+     {0xF100, 0xF21F}, {0xF311, 0xF7FF}}};
+// cwreloc: byte-identical to `cw` (origin-0 boot-payload image, cw template),
+// but with rom_seg = 3 so the DSR-aware codegen paths emit `DSRI #3` before
+// ROM-data loads.  This is the mode for code that is compiled at origin 0 and
+// then statically relocated into the bank-3 flash gap by relocate_blob.py:
+// the relocator adds the 0x0E40 offset to data addresses, and the DSRI prefix
+// selects the bank.  `--target cw` (rom_seg = 0) is unchanged.
+static const Target TARGET_CWRELOC{
+    "cwreloc", "ML620906", "template_ML620906.asm", 0xD000, 0xD000, 0xD000,
+    0xDDD3, 1, 3, 63, "nX-U16/100", 1, TARGET_CW.reserved_ram};
 const Target TARGET_FW{"fwnx", "ML620906", "template_fwnx.asm", 0, 0, 0, 0x40000,
                         1, 0, 63, "nX-U16/100", 0, {}};
 
@@ -25,7 +45,7 @@ const std::string DEFAULT_TARGET = [] {
     return std::string(e && *e ? e : "cwii");
 }();
 
-static const char* const MODELS = "580, 880, cwapp, fwnx";
+static const char* const MODELS = "580, 880, cwapp, cwreloc, fwnx";
 
 std::optional<std::string> canonical(const std::string& name) {
     std::string key;
@@ -34,7 +54,8 @@ std::optional<std::string> canonical(const std::string& name) {
         key += (char)std::tolower((unsigned char)c);
     }
     static const std::unordered_map<std::string, std::string> ALIASES = {
-        {"580", "cw"}, {"cw", "cw"}, {"880", "cwii"}, {"cwii", "cwii"}, {"cwapp", "cwapp"}, {"fwnx", "fwnx"}, {"fw", "fwnx"}};
+        {"580", "cw"}, {"cw", "cw"}, {"880", "cwii"}, {"cwii", "cwii"}, {"cwapp", "cwapp"},
+        {"cwreloc", "cwreloc"}, {"fwnx", "fwnx"}, {"fw", "fwnx"}};
     auto it = ALIASES.find(key);
     if (it == ALIASES.end()) return std::nullopt;
     return it->second;
@@ -44,6 +65,7 @@ const Target& get_target(const std::string& t) {
     auto name = canonical(t);
     if (!name) throw std::runtime_error(fmt("unknown target '%s' (use %s)", t.c_str(), MODELS));
     if (*name == "cw") return TARGET_CW;
+    if (*name == "cwreloc") return TARGET_CWRELOC;
     if (*name == "cwii") return TARGET_CWII;
     if (*name == "cwapp") return TARGET_CWAPP;
     if (*name == "fwnx" || *name == "fw") return TARGET_FW;

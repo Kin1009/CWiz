@@ -123,9 +123,9 @@ void check_two_apps(TempDir& dir) {
     wt::check("cwapplink 2-app: blocks match standalone builds at the same base",
               r.apps.size() == 2 && block_matches(r.rom, r.apps[0]) &&
                   block_matches(r.rom, r.apps[1]));
-    if (g.count("output_sha256")) {
-        wt::check("cwapplink 2-app: golden byte hash",
-                  wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
+    wt::check("cwapplink 2-app: golden byte hash",
+              wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
+    if (g.count("base_sha256")) {
         wt::check("cwapplink 2-app: golden base ROM", wt::sha256_hex(base_rom()) ==
                                                           g.at("base_sha256"));
     }
@@ -143,11 +143,11 @@ void check_thirteen_apps(TempDir& dir) {
         write_file(dir.path + "/" + name, extra_source(slot, a.c_str(), b.c_str(), text.c_str()));
         names.push_back(name);
     }
+    const std::map<std::string, std::string> g = golden("golden_13.txt");
     std::string manifest = "# thirteen apps\n\n";
     for (const std::string& name : names) manifest += name + "\n";
     write_file(dir.path + "/project.cwapplink", manifest);
 
-    const std::map<std::string, std::string> g = golden("golden_13.txt");
     wiz::CwappLinkResult r = wiz::build_cwapplink(dir.path + "/project.cwapplink", base_rom(), false);
     wt::check("cwapplink 13-app: build succeeds", r.ok, r.error);
     if (!r.ok) return;
@@ -171,10 +171,8 @@ void check_thirteen_apps(TempDir& dir) {
     wt::check("cwapplink 13-app: blocks are ordered, distinct and match relocated builds",
               blocks_ok);
     wt::check("cwapplink 13-app: every mode entry is distinct", entries_ok);
-    if (g.count("output_sha256")) {
-        wt::check("cwapplink 13-app: golden byte hash",
-                  wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
-    }
+    wt::check("cwapplink 13-app: golden byte hash",
+              wt::sha256_hex(r.rom) == g.at("output_sha256"), wt::sha256_hex(r.rom));
 }
 
 void check_three_arg_icons(TempDir& dir) {

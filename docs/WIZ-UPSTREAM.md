@@ -46,7 +46,7 @@ the C++ port does more than upstream.
 
 ## 3. Built-ins
 
-Upstream `BUILTINS` (20 names) vs the two C++ front ends:
+Upstream `BUILTINS` (21 names at `pkdev-en/Wiz@3a4308a`) vs the two C++ front ends:
 
 | Upstream builtin | Arity | C++ Wiz | C++ CWiz | Notes |
 |---|---|---|---|---|
@@ -66,8 +66,9 @@ Upstream `BUILTINS` (20 names) vs the two C++ front ends:
 
 ## 4. Standard-library prelude
 
-Upstream has 37 `PRELUDE` keys.  C++ Wiz keeps the same source-PRELUDE model;
-CWiz has a parallel C-syntax prelude.
+Upstream has 51 `PRELUDE` keys at `3a4308a` (14 in the base dict literal plus
+37 later assignments).  C++ Wiz keeps the same source-PRELUDE model; CWiz has
+a parallel C-syntax prelude.
 
 | Upstream prelude | C++ Wiz | C++ CWiz | Notes |
 |---|---|---|---|
@@ -114,6 +115,9 @@ copied byte-for-byte.
 
 RAM limits differ by design: the C++ allocator stops before the SB2 shadow
 buffer (`var_limit` 0xCA54 on cwii, 0xDDD3 on cw), not at upstream's 0xE000.
+For `cwapp`, C++ mirrors upstream's `0xE820/0xEE00` window and additionally
+skips the fx-580VN X firmware ranges/immutable addresses documented in
+[`CWAPP.md`](CWAPP.md) — see `cwiz_os/docs/cwizapp-ram-exclusions.md`.
 
 ## 7. Directives and sections
 
@@ -142,7 +146,7 @@ uses it is currently rejected by the CWiz front end (pre-existing).
 | — | `-E/--pp`, `--color[=WHEN]`, `-v/--version`, `-h/--help` |
 | `error [target]:` + source line | gcc-style `file:line:col: error: ... [code]` + `help:` |
 | exit 2 on failure | exit 1 on failure |
-| `note` for ROM overflow / compiler notes | `note:` diagnostics and `->`/`OK` progress lines |
+| no hard ROM-size cap (upstream removed `ROM_LIMIT` and the overflow note in `4b1e291`/`3a4308a`) | `ROM [[at]]` is bounded only by the 16-bit address space; `note:` diagnostics and `->`/`OK` progress lines |
 
 ## 9. Assembler / opcodes
 

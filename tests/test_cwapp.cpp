@@ -93,15 +93,15 @@ void wt::run_cwapp() {
     check("cwapp: AC reaches key_down and the app's exit() opens the firmware menu",
           c.why == "stop at 2:AD4C", c.why);
 
-    // Key polling app: AC must come back as scan index 29, MENU must leave
+    // Key polling app: AC must come back as scan index 34, MENU must leave
     // through the saved set_mode continuation without a reset, and exit() /
     // returning from main() must use the same clean path.
     const std::string key_src =
         "int R = -2;\n"
         "void main() { while (1) { int k = key(); if (k >= 0) { R = k; delay(1); } } }\n";
     Machine ac = run_cwiz_app(key_src, 2000000, true, 300000, "K_AC");
-    check("cwapp: key() returns K_AC (29) while the app keeps running",
-          uvar_of(ac.m, ac.vars, "R") == 29 && ac.why == "max steps",
+    check("cwapp: key() returns K_AC (34) while the app keeps running",
+          uvar_of(ac.m, ac.vars, "R") == 34 && ac.why == "max steps",
           wiz::fmt("%d %s", uvar_of(ac.m, ac.vars, "R"), ac.why.c_str()));
     Machine menu = run_cwiz_app(key_src, 3000000, true, 1500000, "K_MENU");
     check("cwapp: MENU opens the firmware menu without resetting",
@@ -277,15 +277,15 @@ void wt::run_cwapp() {
     }
 
     // Non-cwapp images must stay byte-identical.  These SHA-256 values were
-    // recorded from the pre-clean-exit compiler and match the current build
-    // byte for byte (the cwapp-only runtime lines are filtered out).
+    // recomputed for the current runtime, which now includes the unsigned-int
+    // helpers (__udiv16/__shr16); the cwapp-only runtime lines are filtered out.
     {
         std::string hello = wiz::read_text_file(root_path("examples/hello/01_hello.cwiz"));
         const std::string hcw = wt::sha256_hex(wiz::build_cwiz(hello, "cw").rom);
         const std::string hcwii = wt::sha256_hex(wiz::build_cwiz(hello, "cwii").rom);
         check("non-cwapp: cw runtime image is unchanged",
-              hcw == "82491e911da8a85272785c77f1b7f1f102d8cc8f3c9179b0c9eb8f55f9977c3e", hcw);
+              hcw == "3b149910151fd0c7bef490ad09576b79a7295f1593875dc6971511d0c5ba201e", hcw);
         check("non-cwapp: cwii runtime image is unchanged",
-              hcwii == "42843ea6fe81a478cc95452b4ca1b16fcd25416cbe567270a033b06858496bb8", hcwii);
+              hcwii == "087cd932d6df8171817d9921167a6b6a65ea7e0bf9daf5e799afbef8140b0f16", hcwii);
     }
 }

@@ -520,8 +520,10 @@ void wt::run_rop() {
         const size_t sp = find_seq(r_keys.bytes, word(0x21F74));
         check("rop: keytable loads the table and runs cmp_ea on ER0",
               gk != kNoPos && ea == gk + 14 && cmp == ea + 6 &&
-                  get == cmp + 4 && sp == get + 8 &&
-                  at(r_keys.bytes, get + 4, 4) == word(0x09FA8),
+                  get == cmp + 4 && sp == get + 12 &&
+                  at(r_keys.bytes, get + 4, 4) == word(0x09FA8) &&
+                  at(r_keys.bytes, get + 8, 4) == word(0x0A05C) &&
+                  at(r_keys.bytes, get + 12, 4) == word(0x21F74),
               wiz::fmt("getkey=%zu pop_ea=%zu cmp=%zu er6=%zu sp=%zu", gk, ea, cmp, get, sp));
         check("rop: keytable table contains the key words",
               has_seq(r_keys.bytes, seq({0x80, 0x04})) &&

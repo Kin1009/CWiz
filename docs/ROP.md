@@ -118,7 +118,7 @@ each.
 | `memcpy(dst, src, len)` | `memcpy_length_rn/8` `0x10F20` | `QR8 = dst, src, len, 0` |
 | `strcpy(dst, src)` | `BL strcpy` `0x203CC` | `XR0 = dst, src` |
 | `calc_func(ptr, result)` | `calc_func` `0x17922` | `XR0 = token pointer, NUM result` |
-| `num_to_str(num, text)` | `num_to_str` `0x279B6` | `XR0 = NUM, destination text` |
+| `num_to_str(num, text)` | `num_to_str` `0x279B8` | `XR0 = NUM, destination text` |
 
 `pad` is normally `0x30`; `line` is the row byte (`0x01`, `0x11`, `0x21`, `0x31`
 for lines 1..4); `font` is `0x08` (small), `0x0A` (medium) or `0x0E` (large).
@@ -150,10 +150,24 @@ The slot is emitted as `00 00`, not the older community `0x3030` marker.
 run-time clear is required; otherwise a compiler loop re-dispatches the last
 key forever (see `firmware-re/fx580/proposals/rop-getkey.md`). Give the table
 a `(0x0000, loop)` default entry. `keytable()` then does
-`pop ea`/`cmp_ea`/`er6=[ea]` and emits `setlr` before `sp=er6,pop er8`. The
-community form also disables interrupts with `setlr_pc; di,rt` first; the
-compiler keeps `setlr`-only until a real-device test confirms the interrupt
-state (TODO, do not change without hardware evidence).
+`pop ea`/`cmp_ea`/`er6=[ea]` and emits `setlr; di,rt` before `sp=er6,pop er8`:
+
+```
+setlr          ; 09FA8: BL 0A058 (EI;RT); POP PC -> LR=0x9FAC
+di,rt          ; 0A05C: DI; RT -> returns to LR=0x9FAC (POP PC)
+sp=er6,pop er8 ; 21F74: consumes the next chain word via POP PC
+```
+
+This is patch 3 of `firmware-re/fx580/proposals/rop-getkey.md` (applied
+2026-11-20). The next `getkey()` calls `setlr` again, whose `BL 0A058` is
+`EI; RT`, so interrupts are re-enabled on the next read. On the 880 the
+gadget is `06E82`; the emitted native chain here is the 580 form. The RAC
+generator path (`wizc --emit-rsc`) is unchanged: its `restore()` block already
+emits `di, rt`. Compiler bytes and a live headless execution trace are
+recorded in
+[`firmware-re/fx580/docs/rop-patch3-status.md`](../firmware-re/fx580/docs/rop-patch3-status.md);
+a real-device test is still outstanding.
+
 Tables use the raw KI/KO words: `up 0x0480`, `down 0x0840`,
 `left 0x0440`, `right 0x0880`. The matching FCxx IDs are `FC1C=up`,
 `FC1D=down`, `FC1E=right`, `FC1F=left`; the old ROP notes had this
@@ -444,7 +458,7 @@ Builtins are mapped to the gadget database (580 and 880):
 | `delay(n)` / `sleep` | `pop er0`, `delay` |
 | `waitshift()` | `waitshift` |
 | `getkey()` / `getscancode()` / `getscancode_nodelay()` | `setlr`, `pop xr0`, clear slot, `pop er0`, inline slot, `getkey` or `getscancode`, `setlr`, `pop er0` |
-| `keytable(...)` / `table(...)` | `pop ea`, `cmp_ea`, `er6 = [ea]`, `sp=er6,pop er8` |
+| `keytable(...)` / `table(...)` | `pop ea`, `cmp_ea`, `er6 = [ea]`, `setlr`, `di,rt`, `sp=er6,pop er8` |
 | `set_byte(addr,v)` / `poke` | `pop xr0`, `[er0]=r2` |
 | `set_word(addr,v)` / `poke_word` | `pop xr0`, `[er0]=er2,rt` |
 | `add_word(addr,delta)` / `add16` | `pop er2`, `pop er8`, `[er8]+=er2,pop xr8` |

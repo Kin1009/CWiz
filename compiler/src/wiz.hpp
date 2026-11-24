@@ -28,6 +28,7 @@ struct WizError : CompileError {
 struct WizResult {
     std::string asm_body;
     std::map<std::string, int> variables;  // qualified name -> RAM address
+    int heap_lo = 0;                       // allocator watermark (cwapp heap base)
 };
 
 WizResult compile_to_asm(const std::string& src, const Target& target);

@@ -1,0 +1,94 @@
+// Recovered firmware application for CWiz OS -- idiomatic integration.
+//
+// This is a PROPER port: the routines called below are the converted
+// idiomatic CWiz modules, not the structural decompilation scaffolding.
+// They are compiled into the boot payload with the normal CWiz register ABI.
+//
+// Inline idiomatic modules (see docs/idiomatic-integration.md for full
+// provenance and equivalence evidence):
+//   scan_raw_keycode()      firmware-re/fx580/cwiz/idiomatic/bank3key/key_getkeycode.cwiz
+//                           (f_2F5E8, raw 7-column keyboard matrix scan;
+//                            154/154 dynamic key-primitive cases match)
+//   zero_key_lines()        firmware-re/fx580/cwiz/idiomatic/bank3key/key_runtime.cwiz
+//                           (f_0A16A, pulled in by key_getkeycode.cwiz;
+//                            bank-0 runtime harness PASS: F046 = 0)
+//
+// The former METRIC row used display_metrics_table_lookup() from
+// cwiz/deep/unknownA/fw_09E24.cwiz.  That function (f_09E24) is explicitly
+// BLOCKED in analysis/idiomatic_b0.json ("software-stack", FP-relative mode
+// slots), so no idiomatic equivalent exists.  It is NOT silently replaced:
+// the row is now labelled RAW and shows the actual recovered scancode word.
+//
+// Diagnostics/wipe/serial/launcher remain the four `keep_custom`
+// authorities; this app does not replace or bypass any of them.
+//
+// STOCK-VISIBLE KEY CONTRACT (docs/key-contract.md)
+// -------------------------------------------------
+// After the recovered raw scan (scan_raw_keycode) the captured scancode word
+// is published through the same firmware globals stock getscancode uses:
+//   D150 (0xD150, 2 bytes LE) = (1 << KI) | ((1 << KO) << 8)
+//   D13A (0xD13A)             = 0x88 (bit7 wait-active + bit3 long-repeat),
+//                               then cleared to 0x00
+// The word is the output of the recovered scan, not an invented key code; a
+// no-press scan leaves D150 untouched, exactly like stock getkeycode.  The
+// CWiz allocator ends at 0xD111 (tools/verify_ram_layout.py), well below
+// D13A/D150, so these globals are not used as CWiz state.  Stock's D139
+// commit flag is deliberately not written: its settled value is already
+// 0x00 on both images and it is not one of the harness watch points.
+// UI NOTE: the original REC / KEY / DSP rows were reduced to one RAW row to
+// stay inside the fixed 0x7B0E boot-payload budget; the row is still readable
+// and shows the actual recovered scancode word.  See docs/key-contract.md.
+
+#include "/Volumes/Code/Wiz/firmware-re/fx580/cwiz/idiomatic/bank3key/key_getkeycode.cwiz"
+
+#define STOCK_KEY_CODE_REG      0xD150   /* 2-byte raw scancode word, LE */
+#define STOCK_KEY_STATE_REG     0xD13A   /* bit7 wait-active, bit3 long-repeat */
+#define STOCK_D13A_ACTIVE       0x88     /* wait-active + long auto-repeat */
+
+// Two-byte raw scancode buffer (byte 0 = inverted KI mask, byte 1 = KO strobe).
+// scan_raw_keycode() receives its address and writes both bytes in place.
+int recovered_key_code;
+
+// Publish one captured raw scancode word through the stock firmware globals.
+// This is the D150 commit of stock getscancode (1:F390/F394) followed by the
+// D13A wait/repeat-bit set+release (0:9FE0 set 0x88, 0:9FFC / 0:9A7A clear).
+void recovered_publish_key(int code_addr) {
+    int word;
+    word = (peek(code_addr) & 0xFF) | ((peek(code_addr + 1) & 0xFF) << 8);
+    poke(STOCK_KEY_CODE_REG, word & 0xFF);
+    poke(STOCK_KEY_CODE_REG + 1, (word >> 8) & 0xFF);
+    poke(STOCK_KEY_STATE_REG, STOCK_D13A_ACTIVE);
+    poke(STOCK_KEY_STATE_REG, 0);
+}
+
+// Scan the raw matrix with the recovered primitive and publish the captured
+// word when a key is held.  The word is the recovered scancode itself, whose
+// key-ID conversion is the stock cvt_key map at 0:7B0E (docs/key-contract.md).
+int recovered_scan_publish(void) {
+    int got;
+    recovered_key_code = 0;
+    got = scan_raw_keycode(&recovered_key_code);
+    if (got != 0) { recovered_publish_key(&recovered_key_code); }
+    return got;
+}
+
+void recovered_app() {
+    int got;
+
+    clearRender();
+    clear();
+
+    // Clear the slot first: a scan with no press leaves it stale
+    // (docs/getkey-deep.md section 2.3), then publish the captured word.
+    got = recovered_scan_publish();
+
+    print_cw(0, 16, "RAW");
+    num_cw(45, 16, recovered_key_code);
+
+    render();
+
+    // Launcher pattern: drain the boot chord, wait for a key, return home.
+    while (key() != K_NONE) { delay(1); }
+    while (key() == K_NONE) { delay(1); }
+    app_launcher();
+}

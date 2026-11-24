@@ -65,6 +65,75 @@ static long long wrap16(long long v) {
     return (v & 0x8000) ? v - 0x10000 : v;
 }
 
+// CWiz extension: a 16-bit cell can be interpreted as signed or unsigned.
+// Canonical INTERNAL type strings (user-facing source still spells these
+// `unsigned int` / `unsigned char`).  Signed spellings keep their old strings
+// so signed-only programs emit byte-identical code.
+static const std::string UINT_TYPE = "uint";    // 16-bit unsigned, 0..65535
+static const std::string UCHAR_TYPE = "uchar";  //  8-bit unsigned, 0..255
+
+static bool is_unsigned_type(const std::string& t) {
+    return t == UINT_TYPE || t == UCHAR_TYPE;
+}
+// Wrap a value into the domain of a type: unsigned values stay non-negative.
+static long long wrap_t(long long v, const std::string& t) {
+    v &= (t == UCHAR_TYPE) ? 0xFF : 0xFFFF;
+    return is_unsigned_type(t) ? v : ((v & 0x8000) ? v - 0x10000 : v);
+}
+static long long wrap16u(long long v) { return v & 0xFFFF; }
+
+// Typed constant value: `uns` selects the 16-bit unsigned domain [0,65535].
+struct CVal {
+    long long v = 0;
+    bool uns = false;
+};
+static CVal cv_cast(long long v, bool uns) {
+    return uns ? CVal{wrap16u(v), true} : CVal{wrap16(v), false};
+}
+static CVal cv_typed(long long v, const std::string& t) {
+    return {wrap_t(v, t), is_unsigned_type(t)};
+}
+
+// Single source of truth for CWiz operator semantics.  All three constant
+// folders (parser, analyser, codegen tables) route through this helper so they
+// cannot drift.  Signed behaviour is exactly the pre-extension behaviour.
+static CVal fold_typed(const std::string& op, CVal a, CVal b) {
+    const bool u = a.uns || b.uns;  // usual conversions: unsigned wins
+    if (u) { a = cv_cast(a.v, true); b = cv_cast(b.v, true); }
+    const long long x = a.v, y = b.v;
+    auto arith = [&](long long r) -> CVal { return cv_cast(r, u); };
+    if (op == "+") return arith(x + y);
+    if (op == "-") return arith(x - y);
+    if (op == "*") return arith(x * y);
+    if (op == "&") return arith(x & y);
+    if (op == "|") return arith(x | y);
+    if (op == "^") return arith(x ^ y);
+    if (op == "/" || op == "%") {
+        if (y == 0) return {0, u};
+        if (u) return arith(op == "/" ? x / y : x % y);
+        long long q = std::llabs(x) / std::llabs(y);
+        if ((x < 0) != (y < 0)) q = -q;
+        return cv_cast(op == "/" ? q : x - q * y, false);
+    }
+    if (op == "<<") {
+        if (u) return arith((long long)((uint16_t)x << (y & 15)));  // C mask for unsigned
+        return (y >= 0 && y <= 15) ? cv_cast(x << (y & 15), false) : CVal{0, false};
+    }
+    if (op == ">>") {
+        if (u) return arith((long long)((uint16_t)x >> (y & 15)));  // logical
+        return (y >= 0 && y <= 15) ? cv_cast(x >> (y & 15), false) : CVal{0, false};
+    }
+    if (op == "==") return {(long long)(x == y), false};
+    if (op == "!=") return {(long long)(x != y), false};
+    if (op == "<") return {(long long)(x < y), false};
+    if (op == ">") return {(long long)(x > y), false};
+    if (op == "<=") return {(long long)(x <= y), false};
+    if (op == ">=") return {(long long)(x >= y), false};
+    if (op == "&&") return {((x && y) ? 1LL : 0LL), false};
+    if (op == "||") return {((x || y) ? 1LL : 0LL), false};
+    return {0, u};
+}
+
 // =================================================================== lexer
 static const std::set<std::string> CW_KEYWORDS = {
     "int", "char", "void", "bool", "const", "static", "volatile", "register",
@@ -87,6 +156,7 @@ static const std::vector<std::string> OP_TABLE = {
 struct Token {
     std::string kind;  // num, str, char, ident, kw, op, eof
     long long num = 0;
+    bool num_unsigned = false;  // u/U suffix, or unsuffixed magnitude >= 0x8000
     std::vector<uint32_t> cps;  // for 'str'
     std::string sval;           // for ident/kw/op
     int line = 1, col = 1;
@@ -199,6 +269,30 @@ static std::vector<Token> lex(const std::string& src) {
     int line = 1, col = 1;
     auto adv = [&](size_t k = 1) { i += k; col += (int)k; };
     auto push = [&](Token t) { toks.push_back(std::move(t)); };
+    // Integer suffix + range rule (CWiz extension): u/U forces unsigned,
+    // l/L is ignored, an unsuffixed magnitude in [32768,65535] is unsigned,
+    // and anything above 0xFFFF is a hard error.
+    auto finish_num = [&](Token& t, int sl, int sc) {
+        bool has_u = false;
+        while (i < n && (src[i] == 'u' || src[i] == 'U' || src[i] == 'l' || src[i] == 'L')) {
+            if (src[i] == 'u' || src[i] == 'U') {
+                if (has_u)
+                    throw CwizError("bad integer literal suffix", sl, sc,
+                                    "use at most one 'u'/'U'", "lex.bad-number");
+                has_u = true;
+            }
+            adv();
+        }
+        if (i < n && ident_cont(src[i]))
+            throw CwizError("bad integer literal suffix", sl, sc,
+                            "use u/U (optionally with l/L), e.g. 0xFFFFu", "lex.bad-number");
+        if (t.num < 0 || t.num > 0xFFFF)
+            throw CwizError("integer literal out of 16-bit range", sl, sc,
+                            "values are 16-bit; max 65535 (0xFFFF)", "lex.literal-out-of-range");
+        t.num_unsigned = has_u || t.num > 0x7FFF;
+        t.line = sl; t.col = sc;
+        push(t);
+    };
 
     while (i < n) {
         char c = src[i];
@@ -243,8 +337,7 @@ static std::vector<Token> lex(const std::string& src) {
                                     "write a hex value, for example 0x1F", "lex.bad-number");
                 Token t; t.kind = "num";
                 t.num = (long long)std::strtoull(digits.c_str(), nullptr, 16);
-                t.line = sl; t.col = sc;
-                push(t);
+                finish_num(t, sl, sc);
             } else if (c == '0' && i + 1 < n && (src[i + 1] == 'b' || src[i + 1] == 'B')) {
                 adv(); adv();
                 std::string digits;
@@ -258,8 +351,7 @@ static std::vector<Token> lex(const std::string& src) {
                                     "write a binary value, for example 0b1010", "lex.bad-number");
                 Token t; t.kind = "num";
                 t.num = (long long)std::strtoull(digits.c_str(), nullptr, 2);
-                t.line = sl; t.col = sc;
-                push(t);
+                finish_num(t, sl, sc);
             } else {
                 std::string digits;
                 auto is_dec = [](char x) { return x >= '0' && x <= '9'; };
@@ -273,8 +365,7 @@ static std::vector<Token> lex(const std::string& src) {
                                     "lex.float");
                 Token t; t.kind = "num";
                 t.num = (long long)std::strtoll(digits.c_str(), nullptr, 10);
-                t.line = sl; t.col = sc;
-                push(t);
+                finish_num(t, sl, sc);
             }
             continue;
         }
@@ -327,7 +418,8 @@ static std::vector<Token> lex(const std::string& src) {
             if (chars.size() != 1)
                 throw CwizError("character literal must hold exactly one character", sl, sc,
                                 "use a string literal (\"...\") for text", "lex.bad-char");
-            Token t; t.kind = "char"; t.num = (long long)(chars[0] & 0xFFFF); t.line = sl; t.col = sc;
+            Token t; t.kind = "char"; t.num = (long long)(chars[0] & 0xFFFF);
+            t.num_unsigned = t.num > 0x7FFF; t.line = sl; t.col = sc;
             push(t);
             continue;
         }
@@ -415,6 +507,7 @@ struct Sym {
     long long value = 0;
     int size = 0;
     int elem_bytes = 2;
+    bool elem_unsigned = false;  // CWiz extension: array/table element signedness
     std::vector<long long> dims;
     std::string scope = "global";
     std::string qname;
@@ -457,6 +550,7 @@ struct Node {
     NK k;
     int line = 0, col = 0;
     long long value = 0;
+    bool unsigned_lit = false;  // NK::Num: u/U suffix or magnitude >= 0x8000
     std::string sval;   // name / Str(/string) / ops
     std::string type;   // VarDecl/Param type, FuncDecl ret, ArrayDecl elem
     std::string kind;   // ArrayDecl kind, Call kind
@@ -520,8 +614,9 @@ static std::set<std::string> referenced_names(const NodeP& n) {
 
 // =================================================================== parser
 static const std::set<std::string> TYPES = {"int", "char", "void", "bool", "char8_t"};
-// Storage classes / width words are accepted and ignored: every value is a
-// 16-bit cell in this toolchain, so `unsigned int` and `int` are the same.
+// Storage classes / width words.  CWiz extension: `unsigned` selects the
+// unsigned 16-bit interpretation (`uint`/`uchar`); `signed`, `short`, `long`
+// remain accepted and ignored (every value is still one 16-bit cell).
 static const std::set<std::string> DECL_QUALIFIERS = {
     "const", "static", "volatile", "register", "extern", "inline", "signed",
     "unsigned", "short", "long", "restrict", "_Atomic", "_Thread_local",
@@ -583,20 +678,23 @@ static const StructField* find_field(const std::string& t, const std::string& na
 // Size in bytes of a value of type `t` when stored in memory (a pointer is 2).
 static int type_bytes(const std::string& t) {
     if (is_ptr_type(t)) return 2;
-    if (t == "char" || t == "char8_t") return 1;
+    if (t == "char" || t == "char8_t" || t == UCHAR_TYPE) return 1;
     if (const TypeDef* d = type_def(t)) return d->size;
-    return 2;
+    return 2;  // int, bool, uint
 }
 // How far `p + 1` moves for a pointer of type `t` (the element size).
 static int ptr_step(const std::string& t) { return type_bytes(ptr_base(t)); }
 static int type_alignment(const std::string& t) {
+    if (t == "char" || t == "char8_t" || t == UCHAR_TYPE) return 1;
     if (is_ptr_type(t) || t == "int" || t == "bool") return 2;
-    if (t == "char" || t == "char8_t") return 1;
     if (const TypeDef* d = type_def(t)) return d->align;
     return 2;
 }
 // The element type of an array whose elements are `elem_bytes` wide.
-static std::string elem_type(int elem_bytes) { return elem_bytes == 1 ? "char" : "int"; }
+static std::string elem_type(int elem_bytes, bool uns = false) {
+    if (elem_bytes == 1) return uns ? UCHAR_TYPE : "char";
+    return uns ? UINT_TYPE : "int";
+}
 
 class CwizParser {
 public:
@@ -820,50 +918,59 @@ private:
     }
 
     // Small constant evaluator usable while parsing (enum values, alignas).
-    long long const_int_expr() {
-        long long v = const_int_unary();
+    // Uses the shared typed folder so unsuffixed large literals / u suffixes
+    // fold identically here and in the analyser / codegen table folders.
+    CVal const_int_expr_val() {
+        CVal v = const_int_unary_val();
         while (at_op1("+") || at_op1("-") || at_op1("*") || at_op1("/") || at_op1("%") ||
                at_op1("<<") || at_op1(">>") || at_op1("&") || at_op1("|") || at_op1("^")) {
             std::string op = next().sval;
-            long long r = const_int_unary();
-            if (op == "+") v += r;
-            else if (op == "-") v -= r;
-            else if (op == "*") v *= r;
-            else if (op == "/" && r) v /= r;
-            else if (op == "%" && r) v %= r;
-            else if (op == "<<") v <<= (r & 15);
-            else if (op == ">>") v >>= (r & 15);
-            else if (op == "&") v &= r;
-            else if (op == "|") v |= r;
-            else if (op == "^") v ^= r;
+            CVal r = const_int_unary_val();
+            v = fold_typed(op, v, r);
         }
-        return wrap16(v);
+        return v;
     }
-    long long const_int_unary() {
-        if (at_op1("-")) { next(); return wrap16(-const_int_unary()); }
-        if (at_op1("+")) { next(); return const_int_unary(); }
-        if (at_op1("~")) { next(); return wrap16(~const_int_unary()); }
-        if (at_op1("(")) { next(); long long v = const_int_expr(); expect_op(")"); return v; }
-        if (cur().kind == "num") return wrap16(next().num);
-        if (cur().kind == "char") return wrap16(next().num);
+    long long const_int_expr() { return const_int_expr_val().v; }
+    CVal const_int_unary_val() {
+        if (at_op1("-")) {
+            next(); CVal v = const_int_unary_val();
+            return v.uns ? CVal{wrap16u(0 - v.v), true} : CVal{wrap16(-v.v), false};
+        }
+        if (at_op1("+")) { next(); return const_int_unary_val(); }
+        if (at_op1("~")) {
+            next(); CVal v = const_int_unary_val();
+            return v.uns ? CVal{wrap16u(~v.v), true} : CVal{wrap16(~v.v), false};
+        }
+        if (at_op1("(")) { next(); CVal v = const_int_expr_val(); expect_op(")"); return v; }
+        if (cur().kind == "num" || cur().kind == "char") {
+            Token t = next();
+            return cv_cast(t.num, t.num_unsigned);
+        }
         if (cur().kind == "ident") {
             std::string n = next().sval;
             auto it = types_.enums.find(n);
-            if (it != types_.enums.end()) return it->second;
+            if (it != types_.enums.end()) return cv_cast(it->second, false);
         }
         throw CwizError("expected an integer constant", cur().line, cur().col,
                         "use a literal or an earlier enum value", "sema.constant");
     }
 
     // Skip storage-class / width keywords and return the base type.
+    // CWiz extension: `unsigned` selects the canonical internal type `uint`
+    // (or `uchar` for an 8-bit element).  Plain signed spellings are unchanged.
     std::string base_type_name() {
         bool had_qualifier = false;
-        while (at_kw(DECL_QUALIFIERS)) { had_qualifier = true; next(); }
+        bool is_unsigned = false;
+        while (at_kw(DECL_QUALIFIERS)) {
+            had_qualifier = true;
+            if (at_kw1("unsigned")) is_unsigned = true;
+            next();
+        }
         const Token& tk = cur();
         if (had_qualifier &&
             (tk.kind == "eof" || tk.kind == "ident" ||
              (tk.kind == "op" && std::string(");,=[]{}").find(tk.sval[0]) != std::string::npos)))
-            return "int";  // `unsigned x`, `sizeof(long)`, `long long` ...
+            return is_unsigned ? UINT_TYPE : "int";  // `unsigned x`, `sizeof(long)`, ...
         if (tk.kind == "kw" && (tk.sval == "struct" || tk.sval == "union"))
             return aggregate_specifier();
         if (tk.kind == "kw" && tk.sval == "enum") {
@@ -891,6 +998,7 @@ private:
                 throw CwizError("_BitInt(N) with N > 16 is not supported by the 16-bit target",
                                 tk.line, tk.col, "use _BitInt(8) or _BitInt(16)",
                                 "sema.bitint-width");
+            if (is_unsigned) return bits <= 8 ? UCHAR_TYPE : UINT_TYPE;
             return bits <= 8 ? "char" : "int";
         }
         if (tk.kind == "kw" && tk.sval == "auto") {
@@ -900,6 +1008,10 @@ private:
         if (tk.kind == "kw" && TYPES.count(tk.sval)) {
             std::string v = tk.sval;
             next();
+            if (is_unsigned) {
+                if (v == "int") return UINT_TYPE;              // unsigned int/short/long
+                if (v == "char" || v == "char8_t") return UCHAR_TYPE;
+            }
             return v;
         }
         if (tk.kind == "ident" && types_.aliases.count(tk.sval)) {
@@ -927,8 +1039,8 @@ private:
     }
 
     static int type_align(const std::string& t) {
+        if (t == "char" || t == "char8_t" || t == UCHAR_TYPE) return 1;
         if (is_ptr_type(t) || t == "int" || t == "bool") return 2;
-        if (t == "char" || t == "char8_t") return 1;
         if (const TypeDef* d = type_def(t)) return d->align;
         return 2;
     }
@@ -1061,35 +1173,29 @@ private:
         return full;
     }
 
-    long long enum_value(const NodeP& e) {
-        if (e->k == NK::Num) return wrap16(e->value);
+    // Enumerators are int-typed, but their *initialisers* fold with the same
+    // typed helper as every other constant-expression site.
+    CVal enum_value_val(const NodeP& e) {
+        if (e->k == NK::Num) return cv_cast(e->value, e->unsigned_lit);
         if (e->k == NK::Unary) {
-            long long v = enum_value(e->a);
-            if (e->sval == "-") return wrap16(-v);
+            CVal v = enum_value_val(e->a);
+            if (e->sval == "-")
+                return v.uns ? CVal{wrap16u(0 - v.v), true} : CVal{wrap16(-v.v), false};
             if (e->sval == "+") return v;
-            if (e->sval == "~") return wrap16(~v);
-            if (e->sval == "!") return v ? 0 : 1;
+            if (e->sval == "~")
+                return v.uns ? CVal{wrap16u(~v.v), true} : CVal{wrap16(~v.v), false};
+            if (e->sval == "!") return {v.v ? 0 : 1, false};
         }
-        if (e->k == NK::Bin) {
-            long long a = enum_value(e->a), b = enum_value(e->b);
-            if (e->sval == "+") return wrap16(a + b);
-            if (e->sval == "-") return wrap16(a - b);
-            if (e->sval == "*") return wrap16(a * b);
-            if (e->sval == "/" && b) return wrap16(a / b);
-            if (e->sval == "%" && b) return wrap16(a % b);
-            if (e->sval == "&") return wrap16(a & b);
-            if (e->sval == "|") return wrap16(a | b);
-            if (e->sval == "^") return wrap16(a ^ b);
-            if (e->sval == "<<") return wrap16(a << (b & 15));
-            if (e->sval == ">>") return wrap16(a >> (b & 15));
-        }
+        if (e->k == NK::Bin)
+            return fold_typed(e->sval, enum_value_val(e->a), enum_value_val(e->b));
         if (e->k == NK::Ident) {
             auto it = types_.enums.find(e->sval);
-            if (it != types_.enums.end()) return it->second;
+            if (it != types_.enums.end()) return cv_cast(it->second, false);
         }
         throw CwizError("enum value is not a constant expression", e->line, e->col,
                         "use literals or earlier enumerators", "sema.enum-constant");
     }
+    long long enum_value(const NodeP& e) { return enum_value_val(e).v; }
 
     void enum_specifier() {
         Token kw = next();
@@ -1300,15 +1406,24 @@ private:
             throw CwizError("[[rom]] and [[rom8]] conflict with this declaration", kind_tok.line,
                             kind_tok.col, "use one storage class only", "sema.attribute-conflict");
         std::string elem = "int";
-        if (at_kw(TYPES)) elem = next().sval;
-        else if (cur().kind == "ident" && types_.aliases.count(cur().sval)) elem = type_name();
-        if (kind == "rom" && elem != "int")
-            throw CwizError("rom stores 16-bit words; its element type must be int", kind_tok.line,
-                            kind_tok.col, "write 'rom int name[N] = { ... };'",
+        {
+            const Token& tk = cur();
+            if (at_kw(TYPES) || at_kw(DECL_QUALIFIERS) ||
+                (tk.kind == "ident" && types_.aliases.count(tk.sval)))
+                elem = type_name();  // canonicalises `unsigned int` -> `uint`
+        }
+        // CWiz extension: a rom word table may hold `unsigned int` elements and
+        // a rom8 byte table may hold `unsigned char`; the byte encoding is the
+        // same, only the interpretation of the read changes.
+        if (kind == "rom" && elem != "int" && elem != UINT_TYPE)
+            throw CwizError("rom stores 16-bit words; its element type must be int or unsigned int",
+                            kind_tok.line, kind_tok.col,
+                            "write 'rom int name[N] = { ... };' or 'rom unsigned int ...'",
                             "sema.type-placement");
-        if (kind == "rom8" && elem != "char")
-            throw CwizError("rom8 stores bytes; its element type must be char", kind_tok.line,
-                            kind_tok.col, "write 'rom8 char name[N] = \"...\";'",
+        if (kind == "rom8" && elem != "char" && elem != UCHAR_TYPE)
+            throw CwizError("rom8 stores bytes; its element type must be char or unsigned char",
+                            kind_tok.line, kind_tok.col,
+                            "write 'rom8 char name[N] = \"...\";'",
                             "sema.type-placement");
         NodeP group = mk(NK::DeclGroup, kind_tok.line, kind_tok.col);
         while (true) {
@@ -1467,12 +1582,15 @@ private:
                 n->align = decl_align;
                 n->attrs = attrs;
                 if (attrs.rom || attrs.rom8) {
-                    if (attrs.rom && ty != "int")
-                        throw CwizError("[[rom]] stores 16-bit words; use int elements",
+                    // CWiz extension: unsigned element types are allowed; the
+                    // byte encoding and layout are unchanged, only the typed
+                    // interpretation of a table read changes.
+                    if (attrs.rom && ty != "int" && ty != UINT_TYPE)
+                        throw CwizError("[[rom]] stores 16-bit words; use int or unsigned int elements",
                                         name.line, name.col, "write '[[rom]] int name[N]'",
                                         "sema.attribute-rom");
-                    if (attrs.rom8 && ty != "char")
-                        throw CwizError("[[rom8]] stores bytes; use char elements",
+                    if (attrs.rom8 && ty != "char" && ty != UCHAR_TYPE)
+                        throw CwizError("[[rom8]] stores bytes; use char or unsigned char elements",
                                         name.line, name.col, "write '[[rom8]] char name[N]'",
                                         "sema.attribute-rom8");
                     n->kind = attrs.rom ? "rom" : "rom8";
@@ -1480,7 +1598,7 @@ private:
                 array_dims(n);
                 if (at_op1("=")) {
                     next();
-                    if (ty == "char" && at_kind("str")) {  // char buf[N] = "..."
+                    if ((ty == "char" || ty == UCHAR_TYPE) && at_kind("str")) {  // char buf[N] = "..."
                         n->cps = next().cps;
                         n->init_is_str = true;
                     } else {
@@ -2219,6 +2337,7 @@ private:
             next();
             NodeP n = mk(NK::Num, tk.line, tk.col);
             n->value = tk.num;
+            n->unsigned_lit = tk.num_unsigned;
             return n;
         }
         if (tk.kind == "str") {
@@ -2903,6 +3022,7 @@ static const int PRINT_MIN = 3;
 
 struct Analyzed {
     std::map<std::string, long long> consts;
+    std::map<std::string, std::string> const_types;  // CWiz extension: canonical type of a const
     std::vector<Sym*> globals;
     std::vector<Sym*> arrays;
     std::vector<Sym*> tables;
@@ -3032,81 +3152,66 @@ private:
         if (it != consts.end()) {
             Sym* s = new_sym("const", name);
             s->value = it->second;
+            auto jt = an.const_types.find(name);
+            s->vtype = (jt != an.const_types.end()) ? jt->second : "int";
             return s;
         }
         return nullptr;
     }
 
     // -- const evaluation ---------------------------------------------
-    long long const_eval(const NodeP& node) {
-        if (node->k == NK::Num) return wrap16(node->value);
+    CVal const_val(const NodeP& node) {
+        if (node->k == NK::Num) return cv_cast(node->value, node->unsigned_lit);
         if (node->k == NK::Unary) {
-            long long v = const_eval(node->a);
-            if (node->sval == "-") return wrap16(-v);
+            CVal v = const_val(node->a);
+            if (node->sval == "-")
+                return v.uns ? CVal{wrap16u(0 - v.v), true} : CVal{wrap16(-v.v), false};
             if (node->sval == "+") return v;
-            if (node->sval == "~") return wrap16(~v);
-            if (node->sval == "!") return v ? 0 : 1;
+            if (node->sval == "~")
+                return v.uns ? CVal{wrap16u(~v.v), true} : CVal{wrap16(~v.v), false};
+            if (node->sval == "!") return {v.v ? 0 : 1, false};
         }
         if (node->k == NK::Bin)
-            return fold(node->sval, const_eval(node->a), const_eval(node->b));
+            return fold_typed(node->sval, const_val(node->a), const_val(node->b));
         if (node->k == NK::Ident) {
             if (Sym* s = find_in(locals, node->sval))
-                if (s->kind == "const") return wrap16(s->value);
+                if (s->kind == "const") return cv_cast(s->value, is_unsigned_type(s->vtype));
             auto it = consts.find(node->sval);
-            if (it != consts.end()) return wrap16(it->second);
+            if (it != consts.end()) {
+                auto jt = an.const_types.find(node->sval);
+                bool uns = (jt != an.const_types.end()) && is_unsigned_type(jt->second);
+                return cv_cast(it->second, uns);
+            }
             err(fmt("'%s' is not a compile-time constant", node->sval.c_str()), node,
                 "only literals and other const values can be used here", "sema.constant");
         }
-        if (node->k == NK::Cast) return const_eval(node->a);
+        if (node->k == NK::Cast) return cv_typed(const_val(node->a).v, node->type);
         if (node->k == NK::Sizeof) {
-            if (!node->type.empty()) return type_bytes(node->type);
+            if (!node->type.empty()) return cv_cast(type_bytes(node->type), false);
             if (node->a && node->a->k == NK::Ident) {
                 Sym* s = resolve(node->a->sval);
                 if (s) {
                     if (s->kind == "array" || s->kind == "rom" || s->kind == "rom8")
-                        return (long long)s->elem_bytes * s->size;
-                    return type_bytes(s->vtype);
+                        return cv_cast((long long)s->elem_bytes * s->size, false);
+                    return cv_cast(type_bytes(s->vtype), false);
                 }
             }
         }
         if (node->k == NK::Alignof) {
-            if (!node->type.empty()) return type_alignment(node->type);
+            if (!node->type.empty()) return cv_cast(type_alignment(node->type), false);
             if (node->a && node->a->k == NK::Ident) {
                 Sym* s = resolve(node->a->sval);
-                if (s) return type_alignment(s->vtype);
+                if (s) return cv_cast(type_alignment(s->vtype), false);
             }
         }
         err("initializer is not a constant expression", node,
             "use a literal or a 'const' value; runtime expressions are not allowed here",
             "sema.constant");
+        return {0, false};
     }
-
-    long long fold(const std::string& op, long long a, long long b) {
-        if (op == "+") return wrap16(a + b);
-        if (op == "-") return wrap16(a - b);
-        if (op == "*") return wrap16(a * b);
-        if (op == "&") return wrap16(a & b);
-        if (op == "|") return wrap16(a | b);
-        if (op == "^") return wrap16(a ^ b);
-        if (op == "/" || op == "%") {
-            if (b == 0) return 0;
-            long long q = std::llabs(a) / std::llabs(b);
-            if ((a < 0) != (b < 0)) q = -q;
-            return wrap16(op == "/" ? q : a - q * b);
-        }
-        if (op == "<<") return (b >= 0 && b <= 15) ? wrap16(a << (b & 15)) : 0;
-        if (op == ">>") return (b >= 0 && b <= 15) ? wrap16(a >> (b & 15)) : 0;
-        if (op == "==") return a == b;
-        if (op == "!=") return a != b;
-        if (op == "<") return a < b;
-        if (op == ">") return a > b;
-        if (op == "<=") return a <= b;
-        if (op == ">=") return a >= b;
-        if (op == "&&") return (a && b) ? 1 : 0;
-        if (op == "||") return (a || b) ? 1 : 0;
-        err(fmt("operator '%s' is not allowed in a constant expression", op.c_str()), nullptr,
-            "constant expressions support + - * / % & | ^ << >> and comparisons",
-            "sema.constant");
+    long long const_eval(const NodeP& node) { return const_val(node).v; }
+    long long fold(const std::string& op, long long a, long long b, bool uns = false) {
+        return fold_typed(op, cv_cast(a, uns), cv_cast(b, uns)).v;
     }
 
     // -- pass 1: globals ----------------------------------------------
@@ -3128,6 +3233,7 @@ private:
             if (consts.count(d->sval) && d->sval.rfind("K_", 0) != 0)
                 err(fmt("redefinition of constant '%s'", d->sval.c_str()), d);
             consts[d->sval] = val;
+            an.const_types[d->sval] = d->type.empty() ? "int" : d->type;
             return;
         }
         if (d->k == NK::VarDecl) {
@@ -3172,6 +3278,7 @@ private:
             Sym* sym = new_sym(d->kind, d->sval);
             sym->size = (int)size;
             sym->elem_bytes = elem_bytes;
+            sym->elem_unsigned = is_unsigned_type(d->type);
             sym->dims = dims;
             sym->align = d->align;
             sym->attrs = d->attrs;
@@ -3401,6 +3508,7 @@ private:
         sym->vtype = node->type.empty() ? "int" : node->type;
         sym->size = (int)total;
         sym->elem_bytes = elem_bytes;
+        sym->elem_unsigned = is_unsigned_type(node->type);
         sym->dims = dims;
         sym->align = node->align;
         sym->attrs = node->attrs;
@@ -3624,7 +3732,7 @@ private:
     std::string expr(const NodeP& e) {
         switch (e->k) {
             case NK::Num:
-                return e->etype = "int";
+                return e->etype = e->unsigned_lit ? UINT_TYPE : "int";
             case NK::Str:
                 return e->etype = "char*";  // a string literal is a ROM char pointer
             case NK::Ident: {
@@ -3637,9 +3745,11 @@ private:
                         "sema.undefined-identifier");
                 }
                 e->sym = sym;
-                if (sym->kind == "const") return e->etype = (is_ptr_type(sym->vtype) ? sym->vtype : "int");
+                if (sym->kind == "const")
+                    return e->etype = (is_ptr_type(sym->vtype) || is_unsigned_type(sym->vtype))
+                                          ? sym->vtype : "int";
                 if (sym->kind == "array" || sym->kind == "rom" || sym->kind == "rom8")
-                    return e->etype = ptr_to(elem_type(sym->elem_bytes));  // array decays to a pointer
+                    return e->etype = ptr_to(elem_type(sym->elem_bytes, sym->elem_unsigned));  // array decays to a pointer
                 if (is_aggregate_type(sym->vtype))
                     err(fmt("'%s' is a struct/union value", e->sval.c_str()), e,
                         "use a member ('.'), '->' on a pointer, or '&' for its address",
@@ -3753,10 +3863,16 @@ private:
                             "sema.not-pointer");
                     return e->etype = ptr_base(t);
                 }
-                if (expr(e->a) == "void")
-                    err("unary operator cannot be applied to a void expression", e,
-                        "call a function that returns a value", "sema.void-expression");
-                return e->etype = "int";
+                {
+                    std::string t = expr(e->a);
+                    if (t == "void")
+                        err("unary operator cannot be applied to a void expression", e,
+                            "call a function that returns a value", "sema.void-expression");
+                    if ((e->sval == "-" || e->sval == "+" || e->sval == "~") &&
+                        is_unsigned_type(t))
+                        return e->etype = UINT_TYPE;  // unsigned wins
+                    return e->etype = "int";
+                }
             case NK::IncDec:
                 return e->etype = lvalue(e->a, true);
             case NK::Sizeof: {
@@ -3807,6 +3923,11 @@ private:
                     if (pa) return e->etype = ta;
                     if (pb) return e->etype = (op == "+") ? tb : "int";
                 }
+                // CWiz extension: usual arithmetic conversions on a 16-bit cell.
+                // Mixed signed/unsigned: unsigned wins.  Signed-only code is
+                // unaffected because both operands must be signed for this not
+                // to fire.
+                if (is_unsigned_type(ta) || is_unsigned_type(tb)) return e->etype = UINT_TYPE;
                 return e->etype = "int";
             }
             case NK::Cond: {
@@ -3818,6 +3939,7 @@ private:
                 if (t == "void" || u == "void")
                     err("conditional expression has a void branch", e,
                         "both branches must produce a value", "sema.void-expression");
+                if (is_unsigned_type(t) || is_unsigned_type(u)) return e->etype = UINT_TYPE;
                 return e->etype = t;
             }
             case NK::Assign: {
@@ -3853,7 +3975,7 @@ private:
                 e->sym = sym;
                 dims = sym->dims;
                 if (dims.empty()) dims.push_back(sym->size);
-                elem = elem_type(sym->elem_bytes);
+                elem = elem_type(sym->elem_bytes, sym->elem_unsigned);
                 elem_bytes = sym->elem_bytes;
             } else {
                 e->sym = sym;
@@ -3972,7 +4094,7 @@ private:
                         e, "read a ROM table with index syntax or peek()/rpeek()",
                         "sema.rom-address");
                 e->sym = sym;
-                return e->etype = ptr_to(elem_type(sym->elem_bytes));
+                return e->etype = ptr_to(elem_type(sym->elem_bytes, sym->elem_unsigned));
             }
             e->sym = sym;
             return e->etype = (sym->vtype.empty() ? "int" : sym->vtype);
@@ -4154,6 +4276,12 @@ static const std::map<std::string, std::string> CW_INV_JUMP = {
     {"==", "JNE"}, {"!=", "JEQ"}, {"<", "JGES"}, {">", "JLES"}, {"<=", "JGTS"}, {">=", "JLTS"}};
 static const std::map<std::string, std::string> CW_TRUE_JUMP = {
     {"==", "JEQ"}, {"!=", "JNE"}, {"<", "JLTS"}, {">", "JGTS"}, {"<=", "JLES"}, {">=", "JGES"}};
+// CWiz extension: unsigned comparisons reuse the EXISTING non-S conditions
+// (asm.cpp cond codes GE=0, LT=1, GT=2, LE=3; carry/Z based).  No new mnemonics.
+static const std::map<std::string, std::string> CW_INV_JUMP_U = {
+    {"==", "JNE"}, {"!=", "JEQ"}, {"<", "JGE"}, {">", "JLE"}, {"<=", "JGT"}, {">=", "JLT"}};
+static const std::map<std::string, std::string> CW_TRUE_JUMP_U = {
+    {"==", "JEQ"}, {"!=", "JNE"}, {"<", "JLT"}, {">", "JGT"}, {"<=", "JLE"}, {">=", "JGE"}};
 static const std::map<std::string, std::string> CW_BUILTIN_LABEL = {
     {"_rpeek", "__rpeek"}, {"render", "__render"}, {"renderStatus", "__renderStatus"}};
 
@@ -4161,7 +4289,14 @@ class Codegen {
 public:
     explicit Codegen(Analyzed& an) : an(an), target(*an.target) { allocate(); }
 
+    int heap_base() const { return next_addr; }
+
     std::string generate() {
+        // runtime.asm's `;@seg` helpers (pulled in when rom_seg != 0) reference
+        // _ROMSEG, which the cwapp boot template defines.  cwreloc uses the
+        // origin-0 cw template, so define it here, ahead of the runtime block.
+        if (target.name == "cwreloc")
+            lines.push_back(fmt("_ROMSEG EQU %d", target.rom_seg));
         label("__wiz_entry");
         // The firmware target has no linked CWiz runtime. Its startup code is
         // recovered/defined by the firmware source itself; do not emit a call
@@ -4226,7 +4361,26 @@ private:
         int natural = sym->kind == "array" ? std::min(2, std::max(1, sym->elem_bytes))
                                            : type_alignment(sym->vtype);
         int align = std::max(std::max(1, sym->align), natural);
-        if (a < target.var_base || a + bytes - 1 > target.var_limit)
+        // C-RAM-44: singleton SFRs are immutable hardware, never allocation
+        // targets.  This runs BEFORE the generic range/reserved checks so
+        // [[at 0xF0C3]] gets the precise diagnostic instead of "outside RAM".
+        // The 13-entry cwapp map also lists these three; this guard is defence
+        // in depth and names the offending register class.  The naming/MMU
+        // overlap (O-C10) stays documentation/risk-register only.
+        // The forbidden-address map is a cwapp-only contract.  Other targets
+        // keep their historical pin semantics byte-for-byte.
+        if (target.name == "cwapp" && overlaps_immutable_sfr(a, bytes))
+            throw CwizError("F0C3/F0D1/F310 are immutable hardware registers; "
+                            "never allocate data there", 0, 0,
+                            "[[at]] may only target allocatable RAM, not SFRs",
+                            "sema.attribute-at-immutable-sfr");
+        // C-RAM-33: on cwapp var_limit is EXCLUSIVE, so the last legal byte is
+        // var_limit - 1.  With `>` a 2-byte pin at var_limit-1 spans
+        // [var_limit-1, var_limit] and is wrongly accepted.
+        const bool past_limit =
+            target.name == "cwapp" ? (a + bytes - 1 >= target.var_limit)
+                                   : (a + bytes - 1 > target.var_limit);
+        if (a < target.var_base || past_limit)
             throw CwizError("[[at]] address is outside RAM for " + what, 0, 0,
                             fmt("use an address in 0x%04X..0x%04X", target.var_base,
                                 target.var_limit),
@@ -4343,40 +4497,37 @@ private:
     }
 
     // -- const eval for table data ------------------------------------
-    long long ev(const NodeP& node) {
-        if (node->k == NK::Num) return wrap16(node->value);
+    // Same typed folder as the parser and analyser, so ROM/array tables agree
+    // with ordinary constant expressions.
+    CVal ev_val(const NodeP& node) {
+        if (node->k == NK::Num) return cv_cast(node->value, node->unsigned_lit);
         if (node->k == NK::Unary) {
-            long long v = ev(node->a);
-            if (node->sval == "-") return wrap16(-v);
+            CVal v = ev_val(node->a);
+            if (node->sval == "-")
+                return v.uns ? CVal{wrap16u(0 - v.v), true} : CVal{wrap16(-v.v), false};
             if (node->sval == "+") return v;
-            if (node->sval == "~") return wrap16(~v);
-            if (node->sval == "!") return v ? 0 : 1;
+            if (node->sval == "~")
+                return v.uns ? CVal{wrap16u(~v.v), true} : CVal{wrap16(~v.v), false};
+            if (node->sval == "!") return {v.v ? 0 : 1, false};
         }
-        if (node->k == NK::Bin) return fold2(node->sval, ev(node->a), ev(node->b));
+        if (node->k == NK::Bin)
+            return fold_typed(node->sval, ev_val(node->a), ev_val(node->b));
         if (node->k == NK::Ident) {
             auto it = an.consts.find(node->sval);
-            if (it != an.consts.end()) return wrap16(it->second);
+            if (it != an.consts.end()) {
+                auto jt = an.const_types.find(node->sval);
+                bool uns = (jt != an.const_types.end()) && is_unsigned_type(jt->second);
+                return cv_cast(it->second, uns);
+            }
         }
+        if (node->k == NK::Cast) return cv_typed(ev_val(node->a).v, node->type);
         throw CwizError("initializer is not a constant expression", node->line, node->col,
                         "use literals and const values; runtime expressions cannot initialise ROM/arrays",
                         "sema.constant");
     }
-    long long fold2(const std::string& op, long long a, long long b) {
-        if (op == "+") return wrap16(a + b);
-        if (op == "-") return wrap16(a - b);
-        if (op == "*") return wrap16(a * b);
-        if (op == "&") return wrap16(a & b);
-        if (op == "|") return wrap16(a | b);
-        if (op == "^") return wrap16(a ^ b);
-        if (op == "/" || op == "%") {
-            if (b == 0) return 0;
-            long long q = std::llabs(a) / std::llabs(b);
-            if ((a < 0) != (b < 0)) q = -q;
-            return wrap16(op == "/" ? q : a - q * b);
-        }
-        if (op == "<<") return (b >= 0 && b <= 15) ? wrap16(a << (b & 15)) : 0;
-        if (op == ">>") return (b >= 0 && b <= 15) ? wrap16(a >> (b & 15)) : 0;
-        return 0;
+    long long ev(const NodeP& node) { return ev_val(node).v; }
+    long long fold2(const std::string& op, long long a, long long b, bool uns = false) {
+        return fold_typed(op, cv_cast(a, uns), cv_cast(b, uns)).v;
     }
 
     // -- leaves -------------------------------------------------------
@@ -4437,7 +4588,7 @@ private:
                 return;
             case NK::Cast:
                 ex(e->a);
-                if (e->type == "char") {
+                if (e->type == "char" || e->type == UCHAR_TYPE) {
                     emit("AND R0, #255");
                     emit("MOV R1, #0");
                 }
@@ -4555,20 +4706,27 @@ private:
             }
         }
         operands(e->a, e->b);
-        apply(op);
+        // Usual conversions: / and % are unsigned if either operand is;
+        // C's >> takes its signedness from the left operand only.
+        bool uns = is_unsigned_type(e->a->etype) || is_unsigned_type(e->b->etype);
+        if (op == ">>") uns = is_unsigned_type(e->a->etype);
+        apply(op, uns);
     }
 
-    void apply(const std::string& op) {
+    void apply(const std::string& op, bool uns = false) {
         if (op == "+") emit("ADD ER0, ER2");
         else if (op == "-") { emit("SUB R0, R2"); emit("SUBC R1, R3"); }
         else if (op == "&") { emit("AND R0, R2"); emit("AND R1, R3"); }
         else if (op == "|") { emit("OR R0, R2"); emit("OR R1, R3"); }
         else if (op == "^") { emit("XOR R0, R2"); emit("XOR R1, R3"); }
-        else if (op == "*") emit("BL __mul16");
-        else if (op == "/") emit("BL __div16");
-        else if (op == "%") { emit("BL __div16"); emit("MOV ER0, ER2"); }
-        else if (op == "<<") emit("BL __shl16");
-        else if (op == ">>") emit("BL __sra16");
+        else if (op == "*") emit("BL __mul16");               // low 16 bits: same for both
+        else if (op == "/") emit(uns ? "BL __udiv16" : "BL __div16");
+        else if (op == "%") {
+            emit(uns ? "BL __udiv16" : "BL __div16");
+            emit("MOV ER0, ER2");
+        }
+        else if (op == "<<") emit("BL __shl16");              // bit-identical for both
+        else if (op == ">>") emit(uns ? "BL __shr16" : "BL __sra16");
         else throw CwizError("internal: unknown operator " + op);
     }
 
@@ -4589,7 +4747,12 @@ private:
             operands(e->a, e->b);
             emit("CMP R0, R2");
             emit("CMPC R1, R3");
-            const auto& m = jump_if ? CW_TRUE_JUMP : CW_INV_JUMP;
+            // The comparison is unsigned iff either operand is unsigned.
+            // Pointer comparisons are intentionally left on the signed path
+            // so signed-only output stays byte-identical.
+            const bool uns = is_unsigned_type(e->a->etype) || is_unsigned_type(e->b->etype);
+            const auto& m = uns ? (jump_if ? CW_TRUE_JUMP_U : CW_INV_JUMP_U)
+                                : (jump_if ? CW_TRUE_JUMP : CW_INV_JUMP);
             emit(m.at(e->sval) + " " + lbl);
             return;
         }
@@ -4644,7 +4807,7 @@ private:
             emit("ADD ER0, ER0");  // p += n moves by n elements
         emit("MOV ER2, ER0");
         emit("POP ER0");
-        apply(e->sval.substr(0, e->sval.size() - 1));
+        apply(e->sval.substr(0, e->sval.size() - 1), is_unsigned_type(e->a->etype));
         store(e->a);
     }
 
@@ -4786,8 +4949,13 @@ private:
             emit("MOV ER0, ER2");
             return;
         }
+        // A ROM-data load must select the table's data bank.  DSR applies to a
+        // single instruction (CPU::Next resets it), so the prefix has to be
+        // emitted here at compile time -- a byte-preserving post-link rewrite
+        // cannot insert it.  Derive the bank from the target instead of a magic
+        // constant; `cwapp` (3) is unchanged and `cwreloc` (3) now gets it too.
         if (!e->via_ptr && sym && (sym->kind == "rom" || sym->kind == "rom8") && target.rom_seg)
-            emit("DSRI #3");
+            emit(fmt("DSRI #%d", target.rom_seg));
         if (type_bytes(e->type) == 1) {
             emit("L R0, [ER2]");
             emit("MOV R1, #0");
@@ -4879,7 +5047,17 @@ private:
         for (int i = (int)c->list.size() - 1; i >= 0; i--) emit(fmt("POP ER%d", i * 2));
         if (name == "pixel" && c->list.size() == 2) const_(4, 1);
         if (name == "_rpeek" && !target.rom_seg) emit("BL __peek");
-        else {
+        else if (name == "_rpeek" && target.name == "cwreloc") {
+            // cwreloc blobs are compiled at origin 0 with the cw boot template,
+            // which (unlike template_cwapp.asm) does not define _ROMSEG used by
+            // __rpeek.  Emit a self-contained DSR-selected byte load instead:
+            // DSRI affects only the immediately following instruction, ER0
+            // still holds the caller's address.
+            emit("MOV ER2, ER0");
+            emit(fmt("DSRI #%d", target.rom_seg));
+            emit("L R0, [ER2]");
+            emit("MOV R1, #0");
+        } else {
             auto it = CW_BUILTIN_LABEL.find(name);
             std::string bare = name;
             while (!bare.empty() && bare[0] == '_') bare.erase(bare.begin());
@@ -4945,11 +5123,23 @@ private:
         std::vector<Sym*> fixed, normal;
         for (Sym* sym : an.tables) {
             if (sym->attrs.has_at) {
+                // C-RAM-36: cwapp ROM data is loaded with DSRI #3 (bank 3,
+                // template ORG 30E40h).  A raw `ORG 0x%04X` would assemble at
+                // physical 0x0XXXX but be read from 3:0xXXXX -> wrong bytes.
+                // Reject the pin; an unpinned rom/rom8 table stays in bank-3
+                // flash.  Non-cwapp targets keep their existing ORG behaviour.
+                if (target.name == "cwapp")
+                    throw CwizError("[[at]] ROM tables are not supported for cwapp; "
+                                    "use an unpinned rom/rom8 table (placed in bank-3 flash "
+                                    "after the code)",
+                                    0, 0, "remove [[at]] from the rom/rom8 declaration",
+                                    "sema.attribute-at-unsupported");
                 long long a = sym->attrs.at;
                 long long bytes = (long long)sym->elem_bytes * sym->size;
-                if (a < 0 || a + bytes > target.rom_limit)
-                    throw CwizError("[[at]] address is outside ROM for table '" + sym->name + "'",
-                                    0, 0, fmt("use 0x0000..0x%04X", target.rom_limit - 1),
+                if (a < 0 || a + bytes > 0x10000)
+                    throw CwizError("[[at]] ROM table exceeds the 16-bit address space for table '" +
+                                        sym->name + "'",
+                                    0, 0, "use 0x0000..0xFFFF",
                                     "sema.attribute-at-range");
                 fixed.push_back(sym);
             } else {
@@ -4969,6 +5159,11 @@ private:
             emit("; --- table " + fixed[i]->name + " (pinned) ---");
             emit_table(fixed[i]);
         }
+        // C-RAM-36 (cwapp): strings (__sN) and unpinned ROM tables (__d_*)
+        // carry no ORG here; they are appended after the boot template's
+        // `ORG 30E40h` and stay in bank-3 flash (0x30E40..0x3FFFF), never in
+        // RAM 0xD000..0xFFFF.  The exclusion map governs RAM only; DSRI #3
+        // resolves these labels to segment 3.
         if (!str_order.empty()) {
             lines.push_back("");
             emit("; --- strings ---");
@@ -5346,12 +5541,16 @@ CwizResult compile_cwiz(const std::string& src, const Target& target) {
 
     CwizResult r;
     r.asm_body = cg.generate();
+    r.heap_lo = cg.heap_base();
     for (Sym* sym : an.globals)
-        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size};
+        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size,
+                                is_unsigned_type(sym->vtype) || sym->elem_unsigned};
     for (Sym* sym : an.arrays)
-        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size};
+        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size,
+                                is_unsigned_type(sym->vtype) || sym->elem_unsigned};
     for (Sym* sym : an.tables)
-        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size};
+        r.variables[sym->name] = CwizVarInfo{sym->addr, sym->kind, sym->size,
+                                is_unsigned_type(sym->vtype) || sym->elem_unsigned};
     g_types = nullptr;
     return r;
 }

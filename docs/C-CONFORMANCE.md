@@ -21,7 +21,8 @@ every pass.
 | Feature | Std | Status | Tests | Notes |
 |---|---|---|---|---|
 | `int`, `char`, `void`, `bool` declarations | C89/C99 | Full | `test_cwiz.cpp` | all values 16-bit; `char` is 8-bit storage, zero-extended |
-| `short`, `signed`, `unsigned`, `long` spellings | C89 | Syntax-only | `test_cwiz.cpp` | accepted and ignored; 16-bit model |
+| `short`, `signed`, `long` spellings | C89 | Syntax-only | `test_cwiz.cpp` | accepted and ignored; every value is a 16-bit cell |
+| `unsigned` / `unsigned int` — real 16-bit unsigned | C89 (**CWiz extension** over upstream Wiz) | Semantic subset | `test_unsigned.cpp` | values 0..65535, wraps mod 2¹⁶; see "Unsigned 16-bit integers (CWiz extension)" and `UNSIGNED.md` |
 | pointers, `&`, `*`, pointer arithmetic | C89 | Full | `test_cwiz.cpp` | 16-bit addresses; element stride from type |
 | arrays, multidimensional arrays | C89 | Full | `test_cwiz.cpp` | flat layout, one index per dimension |
 | structs, unions, typedefs | C89 | Semantic subset | `test_cwiz.cpp` | packed/aligned layout; no struct params/returns/assignment by value |
@@ -83,21 +84,45 @@ every pass.
 | 16-bit `int` | Full | `test_cwiz.cpp` | two's complement |
 | 32-bit integer types | N/A (target) | experiment (`sizeof(long) == 2`) | nX-U16 ALU/registers are 16-bit; a 32-bit software layer is not implemented |
 | floating point | N/A (target) | experiment (`lex.float`) | no FPU, no soft-float runtime; literals rejected with a targeted error |
-| signed/unsigned conversions and promotions | Semantic subset | `test_cwiz.cpp` | all arithmetic is 16-bit two's complement |
-| integer constant typing | Semantic subset | `test_cwiz.cpp` | suffix/width words ignored |
+| signed/unsigned conversions and promotions | Semantic subset | `test_unsigned.cpp` | signed arithmetic unchanged (16-bit two's complement); when either operand is unsigned the operation uses 0..65535 semantics (usual C conversions on a 16-bit cell) |
+| integer constant typing | Semantic subset | `test_unsigned.cpp` | unsuffixed decimal/hex 32768..65535 and `u`/`U` are unsigned; lone `l`/`L` ignored; > 0xFFFF is `lex.literal-out-of-range` |
+| unsigned 16-bit integer (`unsigned int`) | **CWiz extension** | `test_unsigned.cpp` | range 0..65535, wraps mod 2¹⁶; `sizeof(unsigned int) == 2` |
+| unsigned 8-bit integer (`unsigned char`) | **CWiz extension** | `test_unsigned.cpp` | range 0..255 with 8-bit storage; `sizeof(unsigned char) == 1` |
+| unsigned `<` `<=` `>` `>=` | **CWiz extension** | `test_unsigned.cpp` | operands compared as 0..65535 when either is unsigned; unsigned wins in mixed expressions (existing `JLT/JGE/JGT/JLE`) |
+| unsigned `/` and `%` | **CWiz extension** | `test_unsigned.cpp` | unsigned divide/remainder via `__udiv16`; divide-by-zero still yields 0 |
+| logical `>>` for unsigned | **CWiz extension** | `test_unsigned.cpp` | zero-fill via `__shr16`; signed `>>` stays arithmetic (sign-extending) |
+| casts `(unsigned)` / `(int)` | **CWiz extension** | `test_unsigned.cpp` | reinterpret the same 16 bits; no bits change |
+| unsigned arrays / struct fields / `rom` tables | **CWiz extension** | `test_unsigned.cpp` | 2-byte storage, unsigned element type tracked for operators; ROM tables currently need an unsigned cast on the loaded word |
 | struct layout/alignment | Semantic subset | `test_cwiz.cpp` | natural 2-byte alignment, packed members |
 | unions | Full (layout) | `test_cwiz.cpp` | members share offset 0 |
 | multi-dimensional arrays | Full | `test_cwiz.cpp` | row decay supported |
 | string escapes `\n \t \xNN \uXXXX \UXXXXXXXX` | Semantic subset | `test_cwiz.cpp` | stored as UTF-8; F4 mapping at runtime |
 
+### Unsigned 16-bit integers (CWiz extension)
+
+Upstream Wiz (Python syntax) has a single signed 16-bit cell and no type
+qualifiers. CWiz (C subset) adds a second *view* of that cell: `unsigned int`
+(and the `uint16_t`/`uint_least16_t`/`uint_fast16_t`/`uintptr_t`/`uintmax_t`
+typedefs from `<stdint.h>`) has the range 0..65535 with arithmetic wrapping
+modulo 2¹⁶; `unsigned char` is the matching 8-bit unsigned type (0..255).
+Unsuffixed literal values in [32768,65535] are unsigned and a `u`/`U` suffix
+forces unsigned; values above 0xFFFF are rejected with
+`lex.literal-out-of-range`. A lone `l`/`L` is ignored. Mixed signed/unsigned
+operands use the usual C conversions — unsigned wins. A cast changes only the
+interpretation of the bits, never the bits themselves. Unsigned comparisons
+reuse the existing non-`S` condition codes (`JLT/JGE/JGT/JLE`); unsigned `/`,
+`%` and `>>` use the `__udiv16` and `__shr16` runtime helpers. Signed `int`
+behaviour is byte-for-byte what it was before. See `UNSIGNED.md` for the full
+walkthrough and `examples/cwiz/unsigned_int.cwiz` for a runnable program.
+
 ## Freestanding headers
 
 | Header | Status | Tests | Notes |
 |---|---|---|---|
-| `<stdint.h>` | Full (8/16) | `test_conformance.cpp` | 32-bit types intentionally absent |
+| `<stdint.h>` | Full (8/16) | `test_conformance.cpp` | 32-bit types intentionally absent; unsigned typedefs now have real 0..65535 semantics |
 | `<stdbool.h>` | Full | `test_conformance.cpp` | `bool` is a keyword |
 | `<stddef.h>` | Semantic subset | `test_conformance.cpp` | `size_t`, `NULL`; no `offsetof` yet |
-| `<limits.h>` | Full | `test_conformance.cpp` | 16-bit limits |
+| `<limits.h>` | Full | `test_conformance.cpp` | 16-bit limits, including `UINT_MAX`/`USHRT_MAX`/`UINT16_MAX` = 65535 |
 | `<stdarg.h>` | Semantic subset | `test_conformance.cpp` | `va_list`, `va_start`, `va_arg`, `va_end`, `va_copy`; int-sized arguments |
 | `<string.h>` | Semantic subset | `test_conformance.cpp` | memcpy/memset/memcmp/memccpy/strlen/strcmp/strcpy/strcat/strchr |
 | `<stdalign.h>` | Full | `test_conformance.cpp` | |

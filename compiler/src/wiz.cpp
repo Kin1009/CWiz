@@ -32,7 +32,7 @@ static const std::map<std::string, int> KEY_CONSTS = {
     {"K_LOGAB", 0x13}, {"K_ANS", 0x3C}, {"K_SIN", 0x34}, {"K_COS", 0x2C}, {"K_TAN", 0x24},
     {"K_LPAREN", 0x1C}, {"K_RPAREN", 0x14},
     {"K_DEL", 0x25}, {"K_AC", 0x1D}, {"K_MUL", 0x26}, {"K_DIV", 0x1E},
-    {"K_PLUS", 0x27}, {"K_MINUS", 0x1F},
+    {"K_PLUS", 0x27}, {"K_MINUS", 0x1F}, {"K_NEG", 0x1F},
     {"K_DOT", 0x0C}, {"K_SCI", 0x0D}, {"K_FORMAT", 0x0E}, {"K_EXE", 0x0F},
     {"SB2", 0xCA54}, {"HIGH", 1}, {"LOW", 0},
     {"SHIFT", 0xF801}, {"MATH_INP", 0xF803}, {"DEG", 0xF804}, {"RAD", 0xF805},
@@ -46,10 +46,10 @@ static const std::map<std::string, int> CW_KEY_CONSTS = {
     {"K_NONE", -1},
     {"K_SHIFT", 56}, {"K_ALPHA", 48}, {"K_UP", 40}, {"K_DOWN", 33}, {"K_LEFT", 41}, {"K_RIGHT", 32},
     {"K_MENU", 24}, {"K_OPTN", 57}, {"K_CALC", 49}, {"K_INTEGRAL", 25}, {"K_X", 17},
-    {"K_FRAC", 58}, {"K_SQRT", 50}, {"K_SQUARED", 42}, {"K_POWER", 34}, {"K_LOG", 26}, {"K_LN", 18},
+    {"K_FRAC", 58}, {"K_SQRT", 50}, {"K_SQUARED", 42}, {"K_LOG", 26}, {"K_LN", 18},
     {"K_NEG", 59}, {"K_DEG", 51}, {"K_INV", 43}, {"K_SIN", 35}, {"K_COS", 27}, {"K_TAN", 19},
     {"K_STO", 60}, {"K_ENG", 52}, {"K_LPAREN", 44}, {"K_RPAREN", 36}, {"K_SD", 28}, {"K_MPLUS", 20},
-    {"K_7", 61}, {"K_8", 53}, {"K_9", 45}, {"K_DEL", 37}, {"K_AC", 29},
+    {"K_7", 61}, {"K_8", 53}, {"K_9", 45}, {"K_DEL", 37}, {"K_AC", 34},
     {"K_4", 62}, {"K_5", 54}, {"K_6", 46}, {"K_MUL", 38}, {"K_DIV", 30},
     {"K_1", 63}, {"K_2", 55}, {"K_3", 47}, {"K_PLUS", 39}, {"K_MINUS", 31},
     {"K_0", 11}, {"K_DOT", 12}, {"K_EXP", 13}, {"K_ANS", 14}, {"K_EXE", 15},
@@ -64,7 +64,9 @@ static const std::map<std::string, int> CW_KEY_CONSTS = {
 }  // namespace
 
 const std::map<std::string, int>& key_consts(const std::string& target_name) {
-    return (target_name == "cw" || target_name == "cwapp") ? CW_KEY_CONSTS : KEY_CONSTS;
+    return (target_name == "cw" || target_name == "cwapp" || target_name == "cwreloc")
+               ? CW_KEY_CONSTS
+               : KEY_CONSTS;
 }
 
 namespace {
@@ -2078,6 +2080,8 @@ public:
 
     std::string compile(const std::string& src);
 
+    int heap_base() const { return next_addr; }
+
     std::map<std::string, int> vars;
     std::vector<std::string> notes;
 
@@ -2978,6 +2982,7 @@ WizResult compile_to_asm(const std::string& src, const Target& target) {
     WizResult r;
     r.asm_body = c.compile(src);
     r.variables = c.vars;
+    r.heap_lo = c.heap_base();
     g_notes = c.notes;
     return r;
 }

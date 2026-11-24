@@ -321,8 +321,17 @@ void wt::run_conformance() {
                   e.code == "sema.attribute-at-reserved", e.msg);
         e = err_of("[[at 0xD260]] int x; [[at 0xD260]] int y; void main() { }", "cw");
         check("error: RAM [[at]] overlap", e.ok && e.code == "sema.attribute-at-overlap", e.msg);
-        e = err_of("[[at 0xE000]] rom int t[2]; void main() { }", "cwii");
-        check("error: ROM [[at]] out of ROM", e.ok && e.code == "sema.attribute-at-range", e.msg);
+        e = err_of("[[at 0xFFFE]] rom int t[2]; void main() { }", "cwii");
+        check("error: ROM [[at]] past 16-bit space",
+              e.ok && e.code == "sema.attribute-at-range", e.msg);
+        {
+            wiz::BuildResult hi = wiz::build_cwiz(
+                "[[rom, at 0xA000]] int t[2]; void main() { }", "cwii");
+            check("ROM [[at]] above the old size cap is accepted",
+                  hi.syms["__d_t"] == 0xA000 &&
+                      hi.full_asm.find("ORG 0xA000") != std::string::npos,
+                  "pinned table placed at 0xA000");
+        }
         e = err_of("[[rom, at 0x3000]] int a[2]; [[rom, at 0x3000]] int b[2];"
                    " void main() { }", "cwii");
         check("error: ROM [[at]] overlap", e.ok &&

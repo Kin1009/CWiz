@@ -6,6 +6,7 @@
 #include "apps/complex/complex.cwiz"
 #include "launcher/menu_icons.cwiz"
 #include "launcher/launcher.cwiz"
+#include "apps/recovered/recovered.cwiz"
 
 // fx-580 RAM exclusions: D16C-D175 Ans, D180-D247 input, D31A-D391 variables,
 // D392-D521 history, D522-D5E9 result, D784-D913 f(x)/g(x). Keep OS data out.
@@ -30,9 +31,19 @@ void main() {
     init();
     store_serial_number();
 
-    // Diagnostics is entered only by holding SHIFT+7 during boot.
+    // Publish the stock-visible key-code contract for whatever is held at
+    // boot.  The SHIFT / SHIFT+7 / SHIFT+8 chords are all present here, so
+    // D150/D13A reflect the same raw scancode the stock key path would commit
+    // before the app dispatch.  This uses the recovered scan + cvt_key path
+    // and does not touch the four keep_custom authorities below.
+    recovered_scan_publish();
+
+    // Diagnostics is entered only by holding SHIFT+7 during boot.  It is the
+    // first boot authority and is never displaced by the recovered app.
     // AC/exit inside diagnostics returns here and halts; it does not jump
     // back into the launcher.
+    // SHIFT+8 is the recovered-firmware app chord (same launcher pattern).
     if (key_down(K_SHIFT) && key_down(K_7)) { diagnostic_menu(); }
+    else if (key_down(K_SHIFT) && key_down(K_8)) { recovered_app(); }
     else { app_launcher(); }
 }

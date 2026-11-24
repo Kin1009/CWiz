@@ -1,5 +1,26 @@
 // sim.hpp - minimal nX-U8/100 simulator. Decodes raw machine code (it does NOT share
 // tables with the assembler, so assembler + compiler + runtime get cross-checked).
+//
+// Unsigned values (CWiz extension; the Python-syntax Wiz front end is unchanged):
+// this is an ISA simulator, so signedness is not stored in the machine state —
+// it lives in the encodings the compiler emits.  The following contracts are
+// already implemented and must be preserved:
+//   * registers / ER pairs hold raw 8/16-bit bits; the unsigned view is 0..255 /
+//     0..65535 (tests/harness.hpp `uvar_of()` reads that view).
+//   * cond() codes 0x0..0x3 are the unsigned conditions GE/LT/GT/LE (C/Z based);
+//     codes 0x4..0x7 are the signed variants (OV^S based).  Both groups already
+//     exist; unsigned CWiz comparisons reuse the non-S group.
+//   * f8()/f16() set C to a carry on add and a borrow on subtract — exactly the
+//     input the unsigned condition codes consume.
+//   * hardware `DIV ERn,Rm` divides an unsigned 16-bit ERn by an unsigned byte
+//     Rm; it is suitable for unsigned / and % as-is.
+//   * shift() kind 0xC is logical SRL (unsigned >>); kind 0xE is arithmetic SRA
+//     (signed >>).
+//   * EXTBW is sign-extension only.  Zero-extension of an unsigned byte is the
+//     compiler's job: emit `MOV R<hi>, #0` after the byte load.
+//   * the 16-bit `MOV ERn,#v` form sign-extends a 7-bit field.  The compiler
+//     must materialize unsigned literals >= 0x8000 with two imm8
+//     `MOV Rn,#imm` instructions instead of using that form.
 #pragma once
 
 #include <cstdint>

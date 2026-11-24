@@ -4,7 +4,20 @@
 #include <string>
 #include <vector>
 
+#include "targets.hpp"
+
 namespace wiz {
+
+// C-RAM-37: ROP payload/launcher placement checks (CWiz [EXT]).  `[addr,
+// addr+len)` must lie inside the target's allocatable RAM.  The cwapp map is
+// the 13-entry TARGET_CWAPP.reserved_ram table plus the stack/globals bands;
+// non-cwapp targets keep their historical payload bytes (checks are inert).
+bool rop_placement_ok(uint32_t addr, size_t len, const Target& tg,
+                      std::string* why = nullptr);
+// Launcher variant: the D180-D247 calculator input area is a documented
+// carve-out from the relocated cwapp stack.
+bool rop_launcher_ok(uint32_t addr, size_t len, const Target& tg,
+                     std::string* why = nullptr);
 
 // One annotated item of a compiled payload, used to re-emit it as RAC source.
 // `offset` is relative to the payload's injection address.
@@ -38,9 +51,12 @@ struct RopResult {
     std::vector<RopRscItem> rsc;
 };
 
-// Compile CWiz-syntax ROP source. `model` is "580" or "880".
+// Compile CWiz-syntax ROP source. `model` is "580" or "880".  `target` selects
+// the RAM map (e.g. "cwapp"); empty derives it from `model`, so existing
+// callers keep their behaviour and verified payload bytes.
 RopResult build_rop(const std::string& source, const std::string& model,
-                    const std::string& language = "cwiz");
+                    const std::string& language = "cwiz",
+                    const std::string& target = std::string());
 
 // True when the source asks for the ROP backend (contains a `#rop` line).
 bool source_is_rop(const std::string& source);
@@ -58,7 +74,8 @@ std::string rop_to_rsc(const RopResult& rop, std::string& error);
 // Generate the RAC source for a #rop source without running RAC (used by
 // --emit-rsc).  Handles `#raw-rsc` and the high-level emitter.
 std::string rop_source_to_rsc(const std::string& source, const std::string& model,
-                              const std::string& language, std::string& error);
+                              const std::string& language, std::string& error,
+                              const std::string& target = std::string());
 
 // Extract a verbatim `#raw-rsc { ... }` block from a #rop source.  The returned
 // text is used as the complete RAC source, unchanged.  Returns false when the
@@ -92,6 +109,7 @@ struct RacRopResult {
 // mandatory: when it is missing or fails, `ok` is false and no image exists.
 RacRopResult build_rop_rac(const std::string& source, const std::string& model,
                            const std::string& language, const std::string& rsc_path,
-                           const std::string& rac_path = std::string());
+                           const std::string& rac_path = std::string(),
+                           const std::string& target = std::string());
 
 } // namespace wiz

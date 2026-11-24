@@ -23,11 +23,13 @@ struct CwizVarInfo {
     int addr = 0;
     std::string kind;
     int size = 0;
+    bool is_unsigned = false;  // CWiz extension: uint/uchar (or unsigned array element)
 };
 
 struct CwizResult {
     std::string asm_body;
     std::map<std::string, CwizVarInfo> variables;
+    int heap_lo = 0;  // allocator watermark (cwapp heap base)
 };
 
 CwizResult compile_cwiz(const std::string& src, const Target& target);

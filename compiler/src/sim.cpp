@@ -79,6 +79,8 @@ void U8::wr16(int a, int v) {
 
 int U8::f8(int res, int a, int b, bool sub, bool chain) {
     int rr = res & 0xFF;
+    // C is a CARRY on add and a BORROW on subtract.  The unsigned condition
+    // codes (cond() cases 0x0..0x3) consume it directly — never invert it here.
     C = (res > 0xFF || res < 0) ? 1 : 0;
     int z = rr == 0 ? 1 : 0;
     Z = chain ? (Z & z) : z;
@@ -90,6 +92,8 @@ int U8::f8(int res, int a, int b, bool sub, bool chain) {
 
 int U8::f16(int res, int a, int b, bool sub) {
     int rr = res & 0xFFFF;
+    // As in f8(): C is carry-on-add / borrow-on-sub.  For CMP + CMPC this
+    // borrow is what makes a 16-bit unsigned `<` work, so keep this exact math.
     C = (res > 0xFFFF || res < 0) ? 1 : 0;
     Z = rr == 0 ? 1 : 0;
     S = rr >> 15;
@@ -106,10 +110,13 @@ void U8::zs(int v) {
 bool U8::cond(int c) const {
     bool bC = C != 0, bZ = Z != 0, bS = S != 0, bOV = OV != 0;
     switch (c) {
+        // Unsigned GE/LT/GT/LE (CARRY/Z based).  These are the existing
+        // non-S mnemonics JGE/JLT/JGT/JLE used by CWiz unsigned comparisons.
         case 0x0: return !bC;
         case 0x1: return bC;
         case 0x2: return !bC && !bZ;
         case 0x3: return bZ || bC;
+        // Signed GE/LT/GT/LE (OV^S based): signed programs keep using these.
         case 0x4: return !(bOV ^ bS);
         case 0x5: return bOV ^ bS;
         case 0x6: return !((bOV ^ bS) || bZ);
@@ -213,6 +220,9 @@ void U8::step() {
                 return;
             }
             if ((n & 1) && !(m & 1)) {
+                // EXTBW is SIGN-extension only.  CWiz unsigned-byte promotion
+                // is zero-extended in codegen (`MOV R<hi>, #0` after the byte
+                // load); no new simulator opcode is needed for the extension.
                 int e = m;
                 int v = r[e];
                 r[e + 1] = (v & 0x80) ? 0xFF : 0;
@@ -245,6 +255,9 @@ void U8::step() {
     }
     if (hi == 0xE) {
         if ((n & 1) == 0 && !(w & 0x0100)) {
+            // This 16-bit form sign-extends a 7-bit immediate.  Codegen must
+            // use two imm8 `MOV Rn,#imm` instructions for unsigned values
+            // >= 0x8000, otherwise 0x8000..0xFFFF become negative here.
             int e = n;
             int v = w & 0x7F;
             v = (v & 0x40) ? v - 128 : v;
@@ -279,9 +292,11 @@ void U8::shift(int kind, int n, int amt) {
         C = (a >> (8 - amt)) & 1;
         r[n] = (a << amt) & 0xFF;
     } else if (kind == 0xC) {
+        // SRL: logical (zero-fill) byte shift — used by unsigned >>.
         C = (a >> (amt - 1)) & 1;
         r[n] = a >> amt;
     } else if (kind == 0xE) {
+        // SRA: arithmetic (sign-preserving) byte shift — used by signed >>.
         int sa = (a & 0x80) ? a - 256 : a;
         C = (sa >> (amt - 1)) & 1;
         r[n] = (sa >> amt) & 0xFF;
@@ -428,10 +443,14 @@ bool U8::f_group(int w, int nxt) {
         return true;
     }
     if (lo == 9 && (n & 1) == 0) {
-        int d = r[m];
-        int a = er(n);
+        // Hardware DIV is already UNSIGNED: ERn is a 16-bit unsigned dividend
+        // and Rm an unsigned byte divisor.  Make that explicit so it is not
+        // "corrected" to a signed divide — unsigned / and % rely on it.  Signed
+        // division is done by the runtime's signed helpers, not by this opcode.
+        uint32_t d = (uint32_t)(uint8_t)r[m];
+        uint32_t a = (uint32_t)(uint16_t)er(n);
         if (d == 0) { set_er(n, 0xFFFF); C = 1; }
-        else { set_er(n, a / d); r[m] = a % d; C = 0; }
+        else { set_er(n, (int)(a / d)); r[m] = (int)(a % d); C = 0; }
         Z = er(n) == 0 ? 1 : 0;
         pc = nxt;
         return true;

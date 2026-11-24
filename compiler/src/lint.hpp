@@ -5,6 +5,9 @@
 //   2. a curated set of style and robustness rules that the compiler does not
 //      report: unused variables, shadowing, unreachable statements, duplicate
 //      target sections, tabs, long lines, trailing whitespace and TODO markers.
+//      CWiz also gets advisory `type/*` rules for the unsigned 16-bit extension
+//      (unsigned wins in mixed expressions, logical >>, wrap, etc.).  Compiler
+//      type/literal errors still arrive as rule "compile" with `code` set.
 //
 // It is deliberately conservative: every style finding is a warning, never an
 // error, so a lint run cannot reject a program the compiler accepts.
@@ -25,7 +28,7 @@ struct LintDiagnostic {
     std::string rule;     // e.g. "readability/unused-variable"
     std::string message;
     std::string hint;     // optional "how to fix" line
-    std::string code;     // optional compiler error category
+    std::string code;     // optional compiler error category (also set by type/* rules)
 };
 
 // `target` is a target name ("580", "880", "cw", "cwii", "cwapp").  The language

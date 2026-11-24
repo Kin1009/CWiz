@@ -1,0 +1,53 @@
+// examples/cwiz/unsigned_int.cwiz
+// Real unsigned 16-bit integers — a CWiz extension (upstream Wiz is signed-only).
+// This is a CWiz (C-subset) program: C types, casts, functions and headers;
+// no Python-syntax Wiz constructs are used or implied. The Wiz front end stays signed-only.
+// Literal rule: unsuffixed 32768..65535 is unsigned; u/U forces unsigned (1u);
+// lone l/L is ignored; a value > 0xFFFF is lex.literal-out-of-range.
+// Build: WIZ_ROOT=$PWD ./build/wizc examples/cwiz/unsigned_int.cwiz
+//
+// EXPECTED OUTPUT (screen 1, then press a key for screen 2):
+//   u       = 65535
+//   (int)u  = -1
+//   u > 0   = 1          // signed -1 > 0 would be 0
+//   u / 2   = 32767
+//   u % 10  = 5
+//   hi      = 32768      // 0x8000 as unsigned
+//   s >> 1  = -1         // signed: arithmetic shift
+//
+//   hi >> 1 = 16384      // unsigned: logical shift
+//   u + 1   = 0          // wraps modulo 2^16
+//   UMAX    = 65535
+//   alias   = 65535
+//   1u > -1 = 0          // unsigned wins: -1 becomes 65535
+
+#include <stdint.h>
+#include <limits.h>
+
+void main() {
+    int s = -1;                 // 0xFFFF interpreted as signed
+    unsigned int u = 65535;     // same bits, unsigned view
+    unsigned int hi = 0x8000;   // 32768 unsigned (-32768 if cast to int)
+    uint16_t alias = 65535;     // <stdint.h> typedef is real unsigned now
+
+    clear();
+    print(2,  0, "u       = ", u);
+    print(2,  9, "(int)u  = ", (int)u);
+    print(2, 18, "u > 0   = ", u > 0);
+    print(2, 27, "u / 2   = ", u / 2);
+    print(2, 36, "u % 10  = ", u % 10);
+    print(2, 45, "hi      = ", hi);
+    print(2, 54, "s >> 1  = ", s >> 1);
+    render();
+    wait_key();
+
+    clear();
+    print(2,  0, "hi >> 1 = ", hi >> 1);
+    u = u + 1;                  // 65535 + 1 wraps to 0
+    print(2,  9, "u + 1   = ", u);
+    print(2, 18, "UMAX    = ", UINT_MAX);
+    print(2, 27, "alias   = ", alias);
+    print(2, 36, "1u > -1 = ", 1u > -1);  // 0: unsigned wins over signed -1
+    render();
+    wait_key();
+}

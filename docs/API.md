@@ -230,10 +230,10 @@ Example: `if key_hit(K_OK): …`
 
 `K_0`=11 `K_1`=63 `K_2`=55 `K_3`=47 `K_4`=62 `K_5`=54 `K_6`=46 `K_7`=61 `K_8`=53 `K_9`=45
 `K_UP`=40 `K_DOWN`=33 `K_LEFT`=41 `K_RIGHT`=32 `K_MENU`=24 `K_OPTN`=57 `K_CALC`=49
-`K_INTEGRAL`=25 `K_X`=17 `K_FRAC`=58 `K_SQRT`=50 `K_SQUARED`=42 `K_POWER`=34 `K_LOG`=26
+`K_INTEGRAL`=25 `K_X`=17 `K_FRAC`=58 `K_SQRT`=50 `K_SQUARED`=42 `K_LOG`=26
 `K_LN`=18 `K_NEG`=59 `K_DEG`=51 `K_INV`=43 `K_SIN`=35 `K_COS`=27 `K_TAN`=19
 `K_STO`=60 `K_ENG`=52 `K_LPAREN`=44 `K_RPAREN`=36 `K_SD`=28 `K_MPLUS`=20
-`K_DEL`=37 `K_AC`=29 `K_MUL`=38 `K_DIV`=30 `K_PLUS`=39 `K_MINUS`=31 `K_DOT`=12
+`K_DEL`=37 `K_AC`=34 `K_MUL`=38 `K_DIV`=30 `K_PLUS`=39 `K_MINUS`=31 `K_DOT`=12
 `K_EXP`=13 `K_ANS`=14 `K_EXE`=15
 
 `K_NONE` is `-1` on both.
@@ -256,7 +256,7 @@ A `cwapp` app owns the CPU, so the firmware keys are handled by the app runtime:
   and the firmware menu routine. There is no reset and no splash. The runtime
   performs this check inside `key()`, `key_down()` and `key_hit()`.
 - AC (`K_AC`) is not intercepted. Plain AC is returned to the app like any other
-  key, so `key()` reports 29 and `key_down(K_AC)` works.
+  key, so `key()` reports 34 and `key_down(K_AC)` works.
 - ON is a repower of the calculator. The firmware then relaunches the app that
   was running; in a multi-app ROM it relaunches that app, not the first app or
   the menu.

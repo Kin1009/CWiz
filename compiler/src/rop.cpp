@@ -56,6 +56,63 @@
 #include "targets.hpp"
 
 namespace wiz {
+
+// ---- C-RAM-37 placement guards (read the C1 13-entry Target map) ----------
+namespace {
+static bool placement_fail(std::string* why, const char* text) {
+    if (why) *why = text;
+    return false;
+}
+// Inclusive overlap of [addr, addr+len) with [lo, hi]; 64-bit end avoids a
+// 0xFFFF wrap.  len == 0 denotes a single point address.
+static bool placement_hits(uint32_t addr, size_t len, uint32_t lo, uint32_t hi) {
+    const uint64_t end = (uint64_t)addr + (len ? (uint64_t)len - 1ull : 0ull);
+    return (uint64_t)addr <= (uint64_t)hi && end >= (uint64_t)lo;
+}
+} // namespace
+
+bool rop_placement_ok(uint32_t addr, size_t len, const Target& tg, std::string* why) {
+    // Only cwapp has the authoritative exclusion map.  Model-derived targets
+    // (580/880) keep their historical addresses and verified payload bytes.
+    if (tg.name != "cwapp") return true;
+    if ((uint64_t)addr + (uint64_t)len > 0x10000ull)
+        return placement_fail(why, "span wraps past 0xFFFF");
+    for (const auto& r : tg.reserved_ram) {  // 8 ranges + 3 singles + 2 guide gaps
+        if (placement_hits(addr, len, (uint32_t)r.first, (uint32_t)r.second)) {
+            const std::string reason = fmt("reserved RAM %04X-%04X", r.first, r.second);
+            return placement_fail(why, reason.c_str());
+        }
+    }
+    if (placement_hits(addr, len, 0xD16Cu, 0xDBCFu))
+        return placement_fail(why, "cwapp stack D16C-DBCF");
+    if (placement_hits(addr, len, 0xE820u, 0xEDE0u))
+        return placement_fail(why, "cwapp globals/heap E820-EDE0");
+    return true;
+}
+
+bool rop_launcher_ok(uint32_t addr, size_t len, const Target& tg, std::string* why) {
+    if (tg.name != "cwapp") return true;
+    if ((uint64_t)addr + (uint64_t)len > 0x10000ull)
+        return placement_fail(why, "span wraps past 0xFFFF");
+    // D180-D247 is the calculator's program input area.  Waive exactly that
+    // one reserved entry (and the stack overlap) only for a launcher that fits
+    // wholly inside the input window.
+    const uint64_t span = len ? (uint64_t)len : 1ull;
+    const bool input_waiver =
+        addr >= 0xD180u && (uint64_t)addr + span - 1ull <= 0xD247u;
+    for (const auto& r : tg.reserved_ram)
+        if (placement_hits(addr, len, (uint32_t)r.first, (uint32_t)r.second)) {
+            if (input_waiver && r.first == 0xD180 && r.second == 0xD247) continue;
+            const std::string reason = fmt("reserved RAM %04X-%04X", r.first, r.second);
+            return placement_fail(why, reason.c_str());
+        }
+    if (!input_waiver && placement_hits(addr, len, 0xD16Cu, 0xDBCFu))
+        return placement_fail(why, "cwapp stack D16C-DBCF (outside D180-D247 input)");
+    if (placement_hits(addr, len, 0xE820u, 0xEDE0u))
+        return placement_fail(why, "cwapp globals/heap E820-EDE0");
+    return true;
+}
+
 namespace {
 
 // ---------------------------------------------------------------- charset
@@ -154,13 +211,23 @@ std::vector<Tok> lex(const std::string& src) {
             std::string h;
             while (j < src.size() && src[j] != ']') h += src[j++];
             if (j >= src.size()) fail("unterminated address literal");
-            h.erase(0, h.find_first_not_of(" \t"));
             std::string hex;
             for (char ch : h)
                 if (std::isxdigit((unsigned char)ch)) hex += ch;
-            if (hex.empty()) fail("empty address literal");
-            push(Tk::Addr, hex, (uint32_t)std::strtoul(hex.c_str(), nullptr, 16));
-            i = j + 1;
+            bool address = !hex.empty();
+            for (char ch : h)
+                if (!std::isxdigit((unsigned char)ch) && !std::isspace((unsigned char)ch)) address = false;
+            std::string compact = h;
+            if (compact == "ea" || compact.rfind("er", 0) == 0 ||
+                compact.rfind("xr", 0) == 0 || compact.rfind("qr", 0) == 0)
+                address = false;
+            if (address) {
+                push(Tk::Addr, hex, (uint32_t)std::strtoul(hex.c_str(), nullptr, 16));
+                i = j + 1;
+                continue;
+            }
+            push(Tk::Sym, "[");
+            i++;
             continue;
         }
         if (c == '"') {
@@ -184,8 +251,17 @@ std::vector<Tok> lex(const std::string& src) {
             if (c == '0' && i + 1 < src.size() && (src[i + 1] == 'x' || src[i + 1] == 'X')) {
                 j = i + 2; std::string h;
                 while (j < src.size() && std::isxdigit((unsigned char)src[j])) h += src[j++];
-                push(Tk::Number, h, (uint32_t)std::strtoul(h.c_str(), nullptr, 16));
+                push(Tk::Number, "0x" + h, (uint32_t)std::strtoul(h.c_str(), nullptr, 16));
                 i = j;
+                continue;
+            }
+            size_t bare = i;
+            while (bare < src.size() && std::isalnum((unsigned char)src[bare])) ++bare;
+            const std::string bare_text = src.substr(i, bare - i);
+            if (bare_text.find_first_of("abcdefABCDEF") != std::string::npos) {
+                push(Tk::Number, bare_text,
+                     (uint32_t)std::strtoul(bare_text.c_str(), nullptr, 16));
+                i = bare;
                 continue;
             }
             while (j < src.size() && std::isdigit((unsigned char)src[j])) num += src[j++];
@@ -195,7 +271,11 @@ std::vector<Tok> lex(const std::string& src) {
         }
         if (std::isalpha((unsigned char)c) || c == '_') {
             size_t j = i;
-            while (j < src.size() && (std::isalnum((unsigned char)src[j]) || src[j] == '_')) j++;
+            // RAC names may contain a dot (`dist.main`, firmware aliases).
+            // Keep them as one token so CWiz inline ROP statements can use
+            // the same qualified symbols without quoting the instruction.
+            while (j < src.size() && (std::isalnum((unsigned char)src[j]) ||
+                                      src[j] == '_' || src[j] == '.')) j++;
             push(Tk::Ident, src.substr(i, j - i));
             i = j;
             continue;
@@ -218,6 +298,18 @@ std::vector<Tok> lex(const std::string& src) {
     return out;
 }
 
+static std::string normalize_rop_text(std::string s) {
+    const std::string punct = ",[]=+|&<>";
+    for (size_t i = 0; i < s.size();) {
+        if (std::isspace((unsigned char)s[i]) && i > 0 && i + 1 < s.size() &&
+            (punct.find(s[i - 1]) != std::string::npos ||
+             punct.find(s[i + 1]) != std::string::npos)) {
+            s.erase(i, 1);
+        } else ++i;
+    }
+    return s;
+}
+
 // ---------------------------------------------------------------- AST
 struct Expr;
 using ExprP = std::shared_ptr<Expr>;
@@ -231,7 +323,7 @@ struct Expr {
 struct Stmt;
 using StmtP = std::shared_ptr<Stmt>;
 struct Stmt {
-    enum Kind { Assign, Call, If, While, For, Goto, Label, Asm, Return } k = Assign;
+    enum Kind { Assign, Call, EmitExpr, If, While, For, Goto, Label, Asm, Raw, Return } k = Assign;
     bool key_assign = false;
     std::string lhs;
     ExprP rhs;
@@ -241,6 +333,7 @@ struct Stmt {
     std::string name;
     std::vector<ExprP> args;
     std::vector<std::string> asm_lines;
+    std::string raw;
 };
 struct Global {
     std::string ty, name;
@@ -394,7 +487,7 @@ private:
                 while (!(peek().k == Tk::Sym && peek().s == ";") && !(peek().k == Tk::Sym && peek().s == "}") && peek().k != Tk::End) {
                     Tok x = next();
                     if (x.k == Tk::Addr) cur += "[0x" + to_hex(x.n) + "]";
-                    else cur += (cur.empty() ? "" : " ") + (x.k == Tk::Number ? std::to_string(x.n) : x.s);
+                    else cur += (cur.empty() ? "" : " ") + x.s;
                 }
                 if (!cur.empty()) s->asm_lines.push_back(cur);
                 eat_sym(";");
@@ -418,6 +511,73 @@ private:
     }
     StmtP stmt_no_semi() {
         auto s = std::make_shared<Stmt>();
+        // Direct ROP operations are valid CWiz statements in a #rop
+        // function. They are deliberately not an asm/escape block: the
+        // source remains ordinary statement syntax and the backend receives
+        // one operation at a time.
+        if (is_ident("lbl")) {
+            next();
+            s->k = Stmt::Label;
+            s->name = next_ident_or_num();
+            return s;
+        }
+        // Firmware register/memory expressions use RAC-shaped operands such
+        // as `[er0]` and comma-separated register tuples. Keep those as one
+        // direct operation instead of forcing them through the C expression
+        // grammar; they are still ordinary statements in the #rop function.
+        if (peek().k == Tk::Ident && at(1).s == "=" &&
+            ((peek().s.size() >= 2 &&
+              ((peek().s[0] == 'r' || peek().s[0] == 'e' || peek().s[0] == 'q' ||
+                peek().s[0] == 'x') && std::isdigit((unsigned char)peek().s[1])) ||
+               (peek().s.size() >= 3 &&
+                (peek().s[0] == 'e' || peek().s[0] == 'x' || peek().s[0] == 'q') &&
+                peek().s[1] == 'r' && std::isdigit((unsigned char)peek().s[2]))) ||
+             peek().s == "ea" || peek().s == "sp")) {
+            s->k = Stmt::Raw;
+            while (!(peek().k == Tk::Sym && peek().s == ";") &&
+                   !(peek().k == Tk::Sym && peek().s == "}") && peek().k != Tk::End) {
+                Tok x = next();
+                s->raw += (s->raw.empty() ? "" : " ") + x.s;
+            }
+            return s;
+        }
+        if (peek().k == Tk::Sym && peek().s == "[") {
+            s->k = Stmt::Raw;
+            while (!(peek().k == Tk::Sym && peek().s == ";") &&
+                   !(peek().k == Tk::Sym && peek().s == "}") && peek().k != Tk::End) {
+                Tok x = next();
+                s->raw += (s->raw.empty() ? "" : " ") + x.s;
+            }
+            return s;
+        }
+        {
+            size_t q = p_;
+            bool low_level_tuple = false;
+            while (q < t_.size() && !(t_[q].k == Tk::Sym && t_[q].s == ";") &&
+                   !(t_[q].k == Tk::Sym && t_[q].s == "}")) {
+                bool direct_head = peek().s == "pop" || peek().s == "push" ||
+                    peek().s == "sp" || peek().s == "ea" ||
+                    (peek().s.size() >= 2 &&
+                     ((peek().s[0] == 'r' || peek().s[0] == 'e' ||
+                       peek().s[0] == 'q' || peek().s[0] == 'x') &&
+                      (std::isdigit((unsigned char)peek().s[1]) || peek().s[1] == 'r')));
+                if (direct_head && (t_[q].s == "=" || t_[q].s == "+=" ||
+                    t_[q].s == "-=" || t_[q].s == "|=" || t_[q].s == ",")) {
+                    low_level_tuple = true; break;
+                }
+                ++q;
+            }
+            if (low_level_tuple && peek().k == Tk::Ident &&
+                peek().s != "if" && peek().s != "while" && peek().s != "for") {
+                s->k = Stmt::Raw;
+                while (!(peek().k == Tk::Sym && peek().s == ";") &&
+                       !(peek().k == Tk::Sym && peek().s == "}") && peek().k != Tk::End) {
+                    Tok x = next();
+                    s->raw += (s->raw.empty() ? "" : " ") + x.s;
+                }
+                return s;
+            }
+        }
         if (peek().k == Tk::Ident && (at(1).s == "=" || at(1).s == "+=" || at(1).s == "-=")) {
             s->k = Stmt::Assign;
             s->lhs = next().s;
@@ -450,7 +610,21 @@ private:
             return s;
         }
         if (peek().k == Tk::Ident && at(1).s == "(") {
-            s->k = Stmt::Call; s->name = next().s; next();
+            const std::string name = next().s;
+            if (name == "eval" || name == "adr") {
+                s->k = Stmt::EmitExpr;
+                s->rhs = std::make_shared<Expr>();
+                s->rhs->k = Expr::Call;
+                s->rhs->s = name;
+                next();
+                while (!(peek().k == Tk::Sym && peek().s == ")")) {
+                    s->rhs->args.push_back(expr());
+                    if (!eat_sym(",")) break;
+                }
+                expect_sym(")");
+                return s;
+            }
+            s->k = Stmt::Call; s->name = name; next();
             while (!(peek().k == Tk::Sym && peek().s == ")")) {
                 s->args.push_back(expr());
                 if (!eat_sym(",")) break;
@@ -459,8 +633,23 @@ private:
             return s;
         }
         auto e = expr();
-        if (e->k == Expr::Call) { s->k = Stmt::Call; s->name = e->s; s->args = e->args; return s; }
-        fail("cannot parse statement");
+        if (e->k == Expr::Call) {
+            if (e->s == "eval" || e->s == "adr") { s->k = Stmt::EmitExpr; s->rhs = e; return s; }
+            s->k = Stmt::Call; s->name = e->s; s->args = e->args; return s;
+        }
+        if (e->k == Expr::Var) {
+            s->k = Stmt::Raw;
+            s->raw = e->s;
+            while (!(peek().k == Tk::Sym && peek().s == ";") &&
+                   !(peek().k == Tk::Sym && peek().s == "}") && peek().k != Tk::End) {
+                Tok x = next();
+                s->raw += (s->raw.empty() ? "" : " ") + x.s;
+            }
+            return s;
+        }
+        s->k = Stmt::EmitExpr;
+        s->rhs = e;
+        return s;
     }
     static std::string to_hex(uint32_t n) { char b[16]; std::snprintf(b, sizeof b, "%04X", n); return b; }
     ExprP expr() { return or_(); }
@@ -506,6 +695,7 @@ private:
     }
     ExprP unary() {
         if (eat_sym("!")) { auto e = std::make_shared<Expr>(); e->k = Expr::Unary; e->s = "!"; e->a = unary(); return e; }
+        if (eat_sym("+")) return unary();
         if (eat_sym("-")) {
             auto z = std::make_shared<Expr>(); z->k = Expr::Num; z->n = 0;
             return bin(z, "-", unary());
@@ -534,7 +724,7 @@ private:
             expect_sym(")");
             return e;
         }
-        fail("unexpected token in expression");
+        fail("unexpected token in expression: '" + x.s + "'");
     }
 };
 
@@ -845,8 +1035,14 @@ struct Emitter {
         auto it = alloc.find(n);
         if (it != alloc.end()) return it->second;
         uint32_t a = next_alloc;
+        // C-RAM-44: this bump allocator can walk past the globals window into
+        // F0C3/F0D1/F310.  Skip the immutable singletons; normal ROP globals
+        // (E800 onward on the legacy targets) are unaffected, so verified
+        // payload bytes stay unchanged.  The full exclusion-aware rewrite and
+        // the cwapp E820/EDE0 rebasing are left to C-RAM-37's placement checks.
+        while (a <= 0xFFFEu && overlaps_immutable_sfr((int)a, 2)) a += 2;
         alloc[n] = a;
-        next_alloc += 2;
+        next_alloc = a + 2;
         return a;
     }
     void emit_le(uint32_t v, int sz) {
@@ -1322,12 +1518,18 @@ struct Emitter {
         // The key handler returns through LEAVE, so LR is not the chain's
         // POP PC by the time the branch target starts.  The community .rsc
         // re-arms LR and disables interrupts before the branch:
-        // setlr_pc; di,rt; sp=er6,pop er8.  getkey() re-enables them.
-        // TODO(real-device): the proposal also suggests di,rt (0A05C) before
-        // sp=er6,pop er8.  Keep the current setlr-only flow until a device
-        // test confirms the interrupt state; the ea_switchcase example and
-        // earlier commits deliberately keep interrupts on.  See docs/ROP.md.
+        // setlr; di,rt; sp=er6,pop er8.  getkey() re-enables them with setlr
+        // (BL 0A058 = EI;RT) on the next read.
+        //
+        // Patch 3 of firmware-re/fx580/proposals/rop-getkey.md: DI,RT at
+        // 0A05C is registered in the 580 gadget table (rop_data.hpp), so
+        // call("di,rt") resolves there.  Chain effect: setlr leaves
+        // LR=0x9FAC (POP PC); di,rt disables interrupts and RTs to 0x9FAC;
+        // POP PC consumes the next word, which is sp=er6,pop er8.
+        // The RAC-generator dispatch (wizc --emit-rsc) is not changed by this
+        // patch; its restore() block already emits `di, rt`.
         call("setlr");
+        call("di,rt");
         call("sp=er6,pop er8");
         log += "  ; keytable: " + std::to_string(table.entries.size()) + " entries\n";
         for (const auto& e : table.entries)
@@ -1507,9 +1709,17 @@ struct Emitter {
                 if (key == "set_byte" || key == "poke") { emit_set_byte(s); return; }
                 if (key == "set_word" || key == "poke_word") { emit_set_word(s); return; }
                 if (key == "add_word" || key == "add16") { emit_add_word(s); return; }
+                // Relocation expressions are emitted by the RSC backend;
+                // they are not gadget calls.
+                if (key == "eval" || key == "adr") return;
+                if (key == "pr_org" || key == "pr_backup" || key == "pr_length" ||
+                    key == "memcpy_auto_jump" || key == "sizeof") return;
                 emit_generic_call(s);
                 return;
             }
+            case Stmt::EmitExpr:
+                // The RSC backend emits relocation expressions.
+                return;
             case Stmt::If: {
                 int c = eval_cond(s->cond);
                 if (c == 0) { for (auto& x : s->else_b) stmt(x); return; }
@@ -1586,6 +1796,22 @@ struct Emitter {
                     }
                 }
                 return;
+            case Stmt::Raw: {
+                std::string k = lower(s->raw);
+                uint32_t a = 0; std::string f;
+                if (find_addr(k, a, f)) { call(k); return; }
+                if (k.rfind("0x", 0) == 0 || k.rfind("hex ", 0) == 0) {
+                    std::string h = k.rfind("hex ", 0) == 0 ? k.substr(4) : k.substr(2);
+                    h.erase(std::remove_if(h.begin(), h.end(), [](unsigned char c) {
+                        return !std::isxdigit(c);
+                    }), h.end());
+                    for (size_t i = 0; i + 1 < h.size(); i += 2)
+                        out.push_back((uint8_t)std::strtoul(h.substr(i, 2).c_str(), nullptr, 16));
+                    return;
+                }
+                call(k);
+                return;
+            }
             case Stmt::Return: log += "  ; return\n"; call("rt"); return;
         }
     }
@@ -2015,7 +2241,7 @@ uint32_t parse_length(int line_no, const std::string& a) {
 }
 
 std::string strip_directives(std::string src, std::string& model, uint32_t& org, bool& has_org,
-                             LauncherOpts& lopts, int& pad) {
+                             LauncherOpts& lopts, int& pad, const Target& tg) {
     std::string out;
     std::istringstream in(src);
     std::string line;
@@ -2060,6 +2286,10 @@ std::string strip_directives(std::string src, std::string& model, uint32_t& org,
                     directive_error(lineno, d, "expected an address",
                                     "preproc.directive-argument");
                 org = directive_u32(lineno, d, a, true);
+                std::string why;
+                if (!rop_placement_ok(org, 0, tg, &why))
+                    directive_error(lineno, d, fmt("#org %04X: %s", org, why.c_str()),
+                                    "rop.placement-forbidden");
                 has_org = true;
                 std::string extra;
                 if (ls >> extra)
@@ -2109,6 +2339,18 @@ std::string strip_directives(std::string src, std::string& model, uint32_t& org,
                     std::string v;
                     if (ls >> v) { lopts.base = directive_u32(lineno, d, v, true); lopts.has_base = true; }
                 }
+                std::string why;
+                const uint32_t copy_len = lopts.length == 1 ? 0x1FEu
+                                        : lopts.length == 2 ? 0x2FEu : 0x3FEu;
+                if (lopts.has_base && !rop_launcher_ok(lopts.base, 36, tg, &why))
+                    directive_error(lineno, d, fmt("#launcher %04X: %s", lopts.base, why.c_str()),
+                                    "rop.placement-forbidden");
+                if (lopts.has_backup && !rop_placement_ok(lopts.backup, copy_len, tg, &why))
+                    directive_error(lineno, d, fmt("backup %04X: %s", lopts.backup, why.c_str()),
+                                    "rop.placement-forbidden");
+                if (lopts.has_main && !rop_placement_ok(lopts.main, copy_len, tg, &why))
+                    directive_error(lineno, d, fmt("main %04X: %s", lopts.main, why.c_str()),
+                                    "rop.placement-forbidden");
                 std::string extra;
                 if (ls >> extra)
                     directive_error(lineno, d, "unexpected text after the launcher options",
@@ -2308,10 +2550,14 @@ bool source_is_rop(const std::string& source) {
     return found;
 }
 
-RopResult build_rop(const std::string& source, const std::string& model, const std::string& language) {
+RopResult build_rop(const std::string& source, const std::string& model,
+                    const std::string& language, const std::string& target) {
     RopResult r;
     r.model = (model == "880" || lower(model) == "880btg") ? "880" : "580";
     try {
+        // C-RAM-37: resolve the RAM map from --target when supplied.  Section
+        // selection stays MODEL-based (580 -> cw) for shipped #for sources.
+        const Target& tg = get_target(target.empty() ? model : target);
         std::string m = r.model;
         uint32_t org = 0xE9E0;
         bool has_org = false;
@@ -2319,7 +2565,7 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
         int pad = 256;  // null buffer appended to the payload
         const std::string selected = select_sections(source, get_target(m));
         const std::string normalized = lower(language) == "wiz" ? wiz_rop_to_cwiz(selected) : selected;
-        std::string body = strip_directives(normalized, m, org, has_org, lopts, pad);
+        std::string body = strip_directives(normalized, m, org, has_org, lopts, pad, tg);
         r.model = m;
         Program prog = Parser(lex(body)).parse();
         if (prog.model.empty()) prog.model = m;
@@ -2330,6 +2576,14 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
         }
         if (!has_org) org = (m == "880") ? 0xE330 : 0xE9E0;
 
+        // C-RAM-37: check the SELECTED defaults as well as explicit #org pins.
+        // For non-cwapp targets the guards are inert, so payload bytes are
+        // unchanged; cwapp violations become hard errors before emission.
+        std::string why;
+        if (!rop_placement_ok(org, 0, tg, &why))
+            throw std::runtime_error(fmt("line 0: #org %04X: %s [rop.placement-forbidden]",
+                                         org, why.c_str()));
+
         // The 580 common launcher copies the injected payload before it lets
         // the chain run.  Absolute addresses emitted into the chain therefore
         // have to be based on the copy destination, not on the temporary
@@ -2337,6 +2591,14 @@ RopResult build_rop(const std::string& source, const std::string& model, const s
         const uint32_t backup = lopts.has_backup ? lopts.backup : org;
         const uint32_t main = lopts.has_main ? lopts.main : 0xD730;
         const bool common = lopts.kind == LauncherKind::Common;
+        // backup/main are copy-window addresses used by the common launcher
+        // only; the simple stub executes in place and never touches them.
+        if (common && !rop_placement_ok(backup, 0, tg, &why))
+            throw std::runtime_error(fmt("line 0: backup %04X: %s [rop.placement-forbidden]",
+                                         backup, why.c_str()));
+        if (common && !rop_placement_ok(main, 0, tg, &why))
+            throw std::runtime_error(fmt("line 0: main %04X: %s [rop.placement-forbidden]",
+                                         main, why.c_str()));
         const bool common_580 = common && m == "580";
         const uint32_t execution_org = common_580 ? main : (common ? backup : org);
         prog.org = execution_org;
@@ -2504,6 +2766,8 @@ struct RacGenerator {
     size_t table_count = 0;
     size_t key_count = 0;
     std::string key_label;
+    std::map<std::string, std::string> key_alias;
+    bool key_slot_defined = false;
     std::string last_label;
     std::string read_label;
     bool restore_used = false;
@@ -2597,7 +2861,11 @@ struct RacGenerator {
         switch (e->k) {
             case Expr::Num: return "0x" + h4(e->n);
             case Expr::Addr: return "0x" + h4(e->n);
+            case Expr::Str: return "\"" + e->s + "\"";
             case Expr::Var: {
+                if (e->s.find('.') != std::string::npos) return e->s;
+                auto ka = key_alias.find(lowercase_ascii(e->s));
+                if (ka != key_alias.end()) return "adr(" + ka->second + ")";
                 auto it = globals.find(e->s);
                 if (it != globals.end()) return "0x" + h4(it->second);
                 return "adr(" + lowercase_ascii(e->s) + ")";
@@ -2605,6 +2873,17 @@ struct RacGenerator {
             case Expr::Bin:
                 return "(" + expr_text(e->a) + " " + e->s + " " + expr_text(e->b) + ")";
             case Expr::Unary: return std::string(e->s == "!" ? "!" : "") + "(" + expr_text(e->a) + ")";
+            case Expr::Call: {
+                std::string out = e->s + "(";
+                for (size_t i = 0; i < e->args.size(); ++i) {
+                    if (i) out += ", ";
+                    if (e->s == "adr" && i == 0 && e->args[i]->k == Expr::Var)
+                        out += e->args[i]->s;
+                    else
+                        out += expr_text(e->args[i]);
+                }
+                return out + ")";
+            }
             default: return "0";
         }
     }
@@ -2681,6 +2960,20 @@ struct RacGenerator {
 
     bool emit_switch_call(const StmtP& s) {
         const std::string key = lowercase_ascii(s->name);
+        if (key == "pr_org" || key == "pr_backup" || key == "pr_length" ||
+            key == "memcpy_auto_jump" || key == "sizeof") {
+            line(key + "()");
+            return true;
+        }
+        if (key == "eval" || key == "adr") {
+            std::string text = key + "(";
+            for (size_t i = 0; i < s->args.size(); ++i) {
+                if (i) text += ", ";
+                text += expr_text(s->args[i]);
+            }
+            line(text + ")");
+            return true;
+        }
         auto arg = [&](size_t i) -> uint32_t {
             uint32_t v = 0;
             if (i < s->args.size() && const_value(s->args[i], v)) return v;
@@ -2878,7 +3171,7 @@ struct RacGenerator {
         }
         if (key == "num_to_str") {
             if (s->args.size() != 2) { fail("num_to_str expects num, text"); return true; }
-            line("xr0 = 0x" + h4(arg(0)) + ", 0x" + h4(arg(1)));
+            line("xr0 = " + expr_text(s->args[0]) + ", " + expr_text(s->args[1]));
             line("num_to_str");
             return true;
         }
@@ -2900,6 +3193,15 @@ struct RacGenerator {
                 if (d != db.data.end()) { addr = d->second; found = candidate; break; }
             }
         }
+        if (addr == 0 && (key == "eval" || key == "adr")) {
+            std::string text = key + "(";
+            for (size_t i = 0; i < s->args.size(); ++i) {
+                if (i) text += ", ";
+                text += expr_text(s->args[i]);
+            }
+            line(text + ")");
+            return true;
+        }
         if (addr == 0) { fail("function '" + s->name + "' has no RAC spelling"); return true; }
         line("call " + h4(addr));
         return true;
@@ -2918,6 +3220,7 @@ struct RacGenerator {
         line("pop er0");
         line("lbl " + key_label);
         line("hex 00 00");
+        key_slot_defined = true;
         line("call 09C20");
         line("call 1C64A");
         line("sp = er6, pop er8");
@@ -2949,6 +3252,7 @@ struct RacGenerator {
                     Stmt copy;
                     copy.name = s->name;
                     emit_key_read(std::make_shared<Stmt>(copy));
+                    key_alias[lowercase_ascii(s->lhs)] = key_label;
                     return;
                 }
                 const std::string lhs = lowercase_ascii(s->lhs);
@@ -2979,6 +3283,9 @@ struct RacGenerator {
                 else emit_switch_call(s);
                 return;
             }
+            case Stmt::EmitExpr:
+                line(expr_text(s->rhs));
+                return;
             case Stmt::Goto: {
                 line("er14 = eval(adr(" + lowercase_ascii(s->name) + ") - 0x2)");
                 line("sp = er14, pop er14");
@@ -2993,6 +3300,9 @@ struct RacGenerator {
                     if (text.empty()) continue;
                     line(text);
                 }
+                return;
+            case Stmt::Raw:
+                line(normalize_rop_text(strip(s->raw)));
                 return;
             case Stmt::Return:
                 line("rt");
@@ -3032,6 +3342,9 @@ struct RacGenerator {
 
     std::string run(unsigned code) {
         copy_code = code;
+        const Func* custom_launcher = nullptr;
+        for (const auto& f : prog.funcs)
+            if (lowercase_ascii(f.name) == "launcher") custom_launcher = &f;
         for (const auto& g : prog.globals) {
             const uint32_t addr = g.has_addr ? g.addr : next_global;
             globals[g.name] = addr;
@@ -3050,7 +3363,12 @@ struct RacGenerator {
             line("[er0]=er2,rt");
         }
         for (const auto& f : prog.funcs) {
-            label(f.name.empty() ? "main" : f.name);
+            if (lowercase_ascii(f.name) == "launcher") continue;
+            // A custom launcher mode is used by full RSC ports. Their inline
+            // asm carries the original labels and must not receive an
+            // additional synthetic `lbl main` at the front of the section.
+            if (!custom_launcher)
+                label(f.name.empty() ? "main" : f.name);
             for (const auto& s : f.body) stmt(s);
         }
         // String pool (first-use order), then bitmap blobs, then the key
@@ -3085,7 +3403,13 @@ struct RacGenerator {
             }
         }
         for (const auto& t : tables) out << t;
-        out << "lbl end\n";
+        if (!key_label.empty() && !key_slot_defined) {
+            out << "lbl " << key_label << "\n";
+            out << "    hex 00 00\n";
+            key_slot_defined = true;
+        }
+        if (!custom_launcher)
+            out << "lbl end\n";
         if (pad > 0) {
             for (int i = 0; i < pad; i += 8) {
                 out << "    hex";
@@ -3095,6 +3419,10 @@ struct RacGenerator {
             }
         }
         out << "\n@section.launcher at 0x" << h4(launcher_base) << "\n\n";
+        if (custom_launcher) {
+            for (const auto& s : custom_launcher->body) stmt(s);
+            return out.str();
+        }
         if (model == "880") {
             out << "    hex fd 26\n";
             out << "    eval(pr_backup(main) - 2)\n";
@@ -3546,6 +3874,24 @@ bool rsc_has_main_backup(const std::string& rsc, uint32_t backup) {
     const std::string needle = "@section.main";
     const size_t pos = text.find(needle);
     if (pos == std::string::npos) return false;
+    // Some community chains are executed in place and therefore omit the
+    // optional `backup` field.  They are still valid exact RSC counterparts;
+    // in that form the section's load address is the requested #org.
+    const size_t line_end = text.find('\n', pos);
+    const size_t at = text.find(" at", pos);
+    if (at != std::string::npos && (line_end == std::string::npos || at < line_end)) {
+        size_t i = at + 3;
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t')) ++i;
+        if (i + 2 < text.size() && text[i] == '0' && text[i + 1] == 'x') {
+            size_t end = i + 2;
+            while (end < text.size() && std::isxdigit((unsigned char)text[end])) ++end;
+            const unsigned long value =
+                std::strtoul(text.substr(i + 2, end - i - 2).c_str(), nullptr, 16);
+            if ((uint32_t)value == backup &&
+                (line_end == std::string::npos || text.find("backup", pos) == std::string::npos))
+                return true;
+        }
+    }
     static const std::string kBackup = "backup";
     const size_t b = text.find(kBackup, pos);
     if (b == std::string::npos) return false;
@@ -3562,7 +3908,7 @@ bool rsc_has_main_backup(const std::string& rsc, uint32_t backup) {
 
 std::string generate_rsc_impl(const std::string& selected, const std::string& m,
                               const std::string& language, unsigned copy_code,
-                              std::string& error) {
+                              std::string& error, const Target& tg) {
     error.clear();
     uint32_t org = 0;
     bool has_org = false;
@@ -3573,12 +3919,20 @@ std::string generate_rsc_impl(const std::string& selected, const std::string& m,
         lower(language) == "wiz" ? wiz_rop_to_cwiz(selected) : selected;
     std::string body;
     try {
-        body = strip_directives(normalized, directive_model, org, has_org, lopts, pad);
+        body = strip_directives(normalized, directive_model, org, has_org, lopts, pad, tg);
     } catch (const std::exception& e) {
         error = e.what();
         return std::string();
     }
     if (!has_org) org = (m == "880") ? 0xE330u : 0xE9E0u;
+    // C-RAM-37: the RSC path enforces the same cwapp placement map as build_rop.
+    {
+        std::string why;
+        if (!rop_placement_ok(org, 0, tg, &why)) {
+            error = fmt("#org %04X: %s [rop.placement-forbidden]", org, why.c_str());
+            return std::string();
+        }
+    }
     Program prog;
     try {
         prog = Parser(lex(body)).parse();
@@ -3590,6 +3944,15 @@ std::string generate_rsc_impl(const std::string& selected, const std::string& m,
     const uint32_t backup = lopts.has_backup ? lopts.backup : org;
     const uint32_t main = lopts.has_main ? lopts.main : 0xD730u;
     const bool common = lopts.kind == LauncherKind::Common;
+    if (common) {  // backup/main are common-launcher copy-window addresses only
+        std::string why;
+        if (!rop_placement_ok(backup, 0, tg, &why) ||
+            !rop_placement_ok(main, 0, tg, &why)) {
+            error = fmt("launcher copy window outside the target RAM map: %s "
+                        "[rop.placement-forbidden]", why.c_str());
+            return std::string();
+        }
+    }
     const uint32_t exec = (common && m == "580") ? main : (common ? backup : org);
     prog.org = exec;
     prog.has_org = true;
@@ -3615,12 +3978,18 @@ std::string generate_rsc_impl(const std::string& selected, const std::string& m,
 }
 
 std::string rop_source_to_rsc(const std::string& source, const std::string& model,
-                             const std::string& language, std::string& error);
+                             const std::string& language, std::string& error,
+                             const std::string& target);
 static std::string make_rsc(const std::string& source, const std::string& model,
                             const std::string& language, unsigned copy_code,
-                            std::string& error) {
+                            std::string& error, const Target& tg) {
     error.clear();
     const std::string m = (model == "880" || lower(model) == "880btg") ? "880" : "580";
+    // Direct RSC/RAC IDE mode supplies a complete RAC source file. Preserve
+    // its sections and addresses verbatim instead of sending @section syntax
+    // through the CWiz parser.
+    if (lower(language) == "rsc")
+        return source;
     std::string selected;
     try {
         selected = select_sections(source, get_target(m));
@@ -3638,7 +4007,7 @@ static std::string make_rsc(const std::string& source, const std::string& model,
         std::string directive_model = m;
         const std::string without_raw = strip_raw_rsc_block(selected);
         try {
-            strip_directives(without_raw, directive_model, org, has_org, lopts, pad);
+            strip_directives(without_raw, directive_model, org, has_org, lopts, pad, tg);
         } catch (const std::exception& e) {
             error = e.what();
             return std::string();
@@ -3646,6 +4015,17 @@ static std::string make_rsc(const std::string& source, const std::string& model,
         const uint32_t expected = lopts.has_base ? lopts.base
                                                  : (m == "880" ? 0x9268u : 0xD180u);
         const uint32_t expected_org = has_org ? org : (m == "880" ? 0xE330u : 0xE9E0u);
+        // C-RAM-37: a verbatim #raw-rsc block carries its own addresses; they
+        // still have to obey the cwapp RAM map (inert for other targets).
+        {
+            std::string why;
+            if (!rop_placement_ok(expected_org, 490, tg, &why) ||
+                !rop_launcher_ok(expected, 36, tg, &why)) {
+                error = fmt("#raw-rsc placement violates the target RAM map: %s "
+                            "[rop.placement-forbidden]", why.c_str());
+                return std::string();
+            }
+        }
         if (raw.find("@section.main") == std::string::npos) {
             error = "#raw-rsc must contain an @section.main section";
             return std::string();
@@ -3669,19 +4049,22 @@ static std::string make_rsc(const std::string& source, const std::string& model,
         return std::string();
     }
 
-    return generate_rsc_impl(selected, m, language, copy_code, error);
+    return generate_rsc_impl(selected, m, language, copy_code, error, tg);
 }
 
 std::string rop_source_to_rsc(const std::string& source, const std::string& model,
-                             const std::string& language, std::string& error) {
-    return make_rsc(source, model, language, 1, error);
+                             const std::string& language, std::string& error,
+                             const std::string& target) {
+    return make_rsc(source, model, language, 1, error,
+                    get_target(target.empty() ? model : target));
 }
 
 RacRopResult build_rop_rac(const std::string& source, const std::string& model,
                            const std::string& language, const std::string& rsc_path,
-                           const std::string& rac_path) {
+                           const std::string& rac_path, const std::string& target) {
     RacRopResult rr;
     const std::string m = (model == "880" || lower(model) == "880btg") ? "880" : "580";
+    const Target& tg = get_target(target.empty() ? model : target);
     const std::string chosen = rac_path.empty() ? default_rac_path() : rac_path;
     rr.rac_path = chosen;
     if (!rac_available(chosen)) {
@@ -3703,7 +4086,7 @@ RacRopResult build_rop_rac(const std::string& source, const std::string& model,
     // keeps the emitted source stable for small payloads (FE 01).
     for (unsigned code = 1; code <= 3; ++code) {
         std::string rsc_error;
-        const std::string rsc = make_rsc(source, m, language, code, rsc_error);
+        const std::string rsc = make_rsc(source, m, language, code, rsc_error, tg);
         if (rsc.empty()) {
             rr.error = rsc_error.empty() ? "cannot emit RAC source" : rsc_error;
             return rr;

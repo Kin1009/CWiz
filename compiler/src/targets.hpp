@@ -28,6 +28,27 @@ struct Target {
     std::vector<std::pair<int, int>> reserved_ram;
 };
 
+// C-RAM-44 / BRIEF Requirement C: immutable single-address hardware registers.
+// Their addresses are fixed by hardware and must never be claimed by an
+// allocator, #preserve window, ROP variable or relocation path.  F0C3's NAME is
+// still OPEN (boss decision O-C10: DCL "RTCWEEK" vs prelude "DAY"); the ADDRESS
+// is immutable either way.  The naming conflict / emulator MMU overlap remain
+// documentation + risk-register items only — no rename or emulator change here.
+inline constexpr int kImmutableSfr0C3 = 0xF0C3;
+inline constexpr int kImmutableSfr0D1 = 0xF0D1;
+inline constexpr int kImmutableSfrF310 = 0xF310;
+inline constexpr int kImmutableSingletons[3] = {
+    kImmutableSfr0C3, kImmutableSfr0D1, kImmutableSfrF310};
+
+// True when [addr, addr + bytes - 1] covers any immutable singleton.
+inline bool overlaps_immutable_sfr(int addr, int bytes) {
+    if (bytes <= 0) return false;
+    const int end = addr + bytes - 1;
+    for (int imm : kImmutableSingletons)
+        if (addr <= imm && end >= imm) return true;
+    return false;
+}
+
 extern const Target TARGET_CWII;
 extern const Target TARGET_CW;
 extern const Target TARGET_CWAPP;
